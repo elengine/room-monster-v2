@@ -26,6 +26,7 @@ export const SPECIES: Species[] = [
   { id: 'chibi', name: 'チビラ', model: 'minion-b01.glb', rarity: 'normal', motion: 'hop', scale: 0.45, tier: 1, color: 0xaaffaa },
   { id: 'mochi', name: 'モチモン', model: 'minion-c01.glb', rarity: 'normal', motion: 'breathe', scale: 0.5, tier: 1, color: 0xffff88 },
   { id: 'pukupuku', name: 'プクプク', model: 'minion-d01.glb', rarity: 'normal', motion: 'stretch', scale: 0.5, tier: 2, color: 0x88ffdd },
+  { id: 'kurage', name: 'クラレ', model: 'Jellyfish.glb', rarity: 'normal', motion: 'fly', scale: 0.5, tier: 2, color: 0xffaadd },
   { id: 'pinto', name: 'ピント', model: 'minion-a02.glb', rarity: 'normal', motion: 'hop', scale: 0.5, tier: 1, color: 0xdd99ff },
   { id: 'tyrant', name: 'ティラント', model: 'Trex.glb', rarity: 'rare', motion: 'breathe', scale: 0.75, tier: 3, color: 0xff7755 },
   { id: 'shadow', name: 'シャドーン', model: 'Bat.glb', rarity: 'secret', motion: 'fly', scale: 0.6, tier: 3, color: 0x554466 },
@@ -35,14 +36,14 @@ export function speciesById(id: string): Species | undefined {
   return SPECIES.find((s) => s.id === id);
 }
 
-/** 出現ロール: normal 100% / rare 約6% / secret 約2% */
+/** 出現ロール: normal 100% / rare 約6% / secret 約2%。通常は fly も25%含めて選ぶ */
 export function rollSpecies(r: number): Species {
   const all = SPECIES as Species[];
-  const secret = all[11] as Species;
-  const rare = all[10] as Species;
+  const secret = all[13] as Species;
+  const rare = all[12] as Species;
   if (r < 0.02) return secret; // シークレット
   if (r < 0.08) return rare;   // レア
-  const n = 10; // 通常10種
-  const k = Math.min(n - 1, Math.floor(((r - 0.08) / 0.92) * n));
-  return all[k] as Species;
+  const normal = all.slice(0, 11); // 通常11種( クラゲ追加で fly 3/11 )
+  const k = Math.min(normal.length - 1, Math.floor(((r - 0.08) / 0.92) * normal.length));
+  return normal[k] as Species;
 }

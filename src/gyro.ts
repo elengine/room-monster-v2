@@ -44,12 +44,13 @@ export function startGyro(): GyroHandle {
     euler.set(deg(e.beta), deg(e.gamma), -deg(e.alpha), 'YXZ');
     qAbs.setFromEuler(euler);
     qAbs.multiply(z90).multiply(q1);
-    // FPS視点: 端末の絶対向きをカメラへ。ロール=0。
-    // 地平線(縦)=世界X軸の正回転、パン(左右ヨー)=世界Y軸の正回転として
-    // 端末局部のオイラーに足さず世界軸で後から合成する( 互いに干渉しない )
-    const qH = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), deg(horizonOffset));
-    const qP = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), deg(panOffset));
-    handle.q.copy(qAbs).premultiply(qH).premultiply(qP);
+    // FPS視点。オフセットは【端末のボディ基準】で後合成する:
+    //   パン(左右ヨー) = ボディ縦軸まわり、地平線(縦) = ボディ横軸まわりの回転。
+    // 前合成(世界基準)にすると180°パンで前後が反転し、手前/奥の傾きまで反対に効く。
+    // ボディ基準の後合成なら「スマホを倒す=床がせり上がる/沈む」がパン値によらず常に追従する。
+    const qPan = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), deg(panOffset));
+    const qHor = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), deg(horizonOffset));
+    handle.q.copy(qAbs).multiply(qPan).multiply(qHor);
     handle.active = true;
   };
   window.addEventListener('deviceorientation', onRot);

@@ -343,23 +343,49 @@ function wireThrow(): void {
   el.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
   // 常駐ボール( つまめる構えボール ): 画面下中央。表示は毎フレームの forceHud に連動させる
   const readyBall = document.createElement('div');
-  readyBall.style.cssText = 'position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 84px);transform:translateX(-50%);width:64px;height:64px;border-radius:50%;z-index:45;pointer-events:none;' +
-    'background:radial-gradient(circle at 35% 28%, #ffb0bc 0%, #ff4d6d 45%, #8f1230 100%);border:3px solid #fff;box-shadow:0 4px 16px rgba(0,0,0,.5), inset 0 -6px 10px rgba(0,0,0,.35);';
+  readyBall.style.cssText = 'position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 84px);transform:translateX(-50%);width:68px;height:68px;border-radius:50%;z-index:45;pointer-events:none;' +
+    'background:radial-gradient(circle at 35% 28%, #ffd2f0 0%, #ff6ba8 40%, #ff2d6f 70%, #8f1230 100%);border:3px solid #fff;box-shadow:0 4px 16px rgba(0,0,0,.5), 0 0 22px rgba(255,60,140,.65), inset 0 -6px 10px rgba(0,0,0,.35);overflow:visible;';
+  // 鮮やかさ+輪っかアニメーション: 子要素のリングがクルクル回る
+  const halo = document.createElement('div');
+  halo.style.cssText = 'position:absolute;inset:-10px;border-radius:50%;border:3px dashed rgba(255,230,255,.9);animation:oheya-spin 3.2s linear infinite;filter:drop-shadow(0 0 8px rgba(255,120,200,.8));';
+  readyBall.appendChild(halo);
+  const style = document.createElement('style');
+  style.textContent = '@keyframes oheya-spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }';
+  document.head.appendChild(style);
   document.body.appendChild(readyBall);
   (window as unknown as { __readyBall?: HTMLElement }).__readyBall = readyBall;
   // HUD非表示の場合は即隠す( スタート画面にボールが残る問題の対策 )
   readyBall.style.display = hud.classList.contains('hidden') ? 'none' : '';
 
-  let sx = 0; let sy = 0; let down = false;
-  el.addEventListener('pointerdown', (e) => { sx = e.clientX; sy = e.clientY; down = true; });
+  // ボールを指でドラッグ: 指に追従し、離すとその位置からフリック発射
+  let drag: { x: number; y: number } | null = null;
+  const setBallAt = (x: number, y: number): void => {
+    readyBall.style.left = `${x - 34}px`;
+    readyBall.style.bottom = `${window.innerHeight - y - 34}px`;
+    readyBall.style.transform = 'none';
+  };
+  const resetBall = (): void => {
+    readyBall.style.left = '50%';
+    readyBall.style.bottom = 'calc(env(safe-area-inset-bottom) + 84px)';
+    readyBall.style.transform = 'translateX(-50%)';
+  };
+  const onDown = (e: PointerEvent): void => {
+    if (!hud.classList.contains('hidden')) { drag = { x: e.clientX, y: e.clientY }; }
+  };
+  const onMove = (e: PointerEvent): void => {
+    if (drag) setBallAt(e.clientX, e.clientY);
+  };
+
+  el.addEventListener('pointerdown', onDown);
+  el.addEventListener('pointermove', onMove);
   el.addEventListener('pointerup', (e) => {
-    if (!down) return;
-    down = false;
-    const dx = e.clientX - sx; const dy = e.clientY - sy;
-    readyBall.style.display = '';
-    if (Math.hypot(dx, dy) < 12 || dy > 0) return; // タップ/下方向は投げない
-    readyBall.style.display = 'none'; // 投げたら構えボールを消す
-    // 一番近いターゲットへベジエでボールを飛ばす
+    const start = drag;
+    drag = null;
+    if (!start) return;
+    const dx = e.clientX - start.x; const dy = e.clientY - start.y;
+    resetBall();
+    if (Math.hypot(dx, dy) < 24 || dy > 0) return; // 小さすぎ/下方向は投げない
+    // 指を離した先へ一番近いターゲットへベジエでボールを飛ばす
     let best: Monster | null = null; let bd = 300;
     const rect = el.getBoundingClientRect();
     for (const m of monsters) {
@@ -373,12 +399,13 @@ function wireThrow(): void {
       if (d < bd) { bd = d; best = m; }
     }
     if (best) {
+      // 画面座標の指位置を3D空間から出して登場位置へつなげる
       const from = field.camera.position.clone().add(new THREE.Vector3(0, -0.4, -0.5));
       const to = best.root.position.clone(); to.y += best.ref.scale;
       const mid = from.clone().lerp(to, 0.5); mid.y += 1.0;
       const ball = new THREE.Mesh(
         new THREE.SphereGeometry(0.09, 18, 14),
-        new THREE.MeshStandardMaterial({ color: 0xff6688, roughness: 0.4 }));
+        new THREE.MeshStandardMaterial({ color: 0xff2d6f, roughness: 0.35, metalness: 0.1 }));
       ball.position.copy(from);
       field.scene.add(ball);
       sfx('throw');

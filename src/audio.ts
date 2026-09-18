@@ -138,16 +138,19 @@ export function startBGM(): void {
       osc.connect(g); g.connect(bgmGain ?? master ?? ctx.destination); // BGM専用ゲイン( 音量・トグル統合 )
       osc.start(t0 + i * beat / 2); osc.stop(t0 + i * beat / 2 + beat / 2);
     }
-    // メロディ(明るいアルペジオ上昇+上_down)
-    const melody = [ch[1] ?? root, ch[2] ?? root, (ch[2] ?? root) * 1.5, ch[1] ?? root];
-    for (let i = 0; i < 4; i++) {
+    // メロディ(明るいアルペジオ上昇+上_down)— 8分音符4連+休みなしの2拍も埋める
+    const melody = [
+      ch[1] ?? root, ch[2] ?? root, (ch[2] ?? root) * 1.5, ch[1] ?? root, // 手前4分音符
+      root * (bassPattern[3] ?? 1.5), (ch[2] ?? root) * 1.5, (ch[1] ?? root) * 1.25, ch[0] ?? root, // 2拍目
+    ];
+    for (let i = 0; i < 8; i++) {
       const osc = ctx.createOscillator(); const g = ctx.createGain();
-      osc.type = 'triangle'; osc.frequency.setValueAtTime(melody[i] ?? root, t0 + i * beat);
-      g.gain.setValueAtTime(0, t0 + i * beat);
-      g.gain.linearRampToValueAtTime(0.06, t0 + i * beat + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * beat + beat - 0.03);
+      osc.type = 'triangle'; osc.frequency.setValueAtTime(melody[i] ?? root, t0 + i * beat / 2);
+      g.gain.setValueAtTime(0, t0 + i * beat / 2);
+      g.gain.linearRampToValueAtTime(0.06, t0 + i * beat / 2 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * beat / 2 + beat / 2 - 0.03);
       osc.connect(g); g.connect(bgmGain ?? master ?? ctx.destination);
-      osc.start(t0 + i * beat); osc.stop(t0 + i * beat + beat);
+      osc.start(t0 + i * beat / 2); osc.stop(t0 + i * beat / 2 + beat / 2);
     }
     bar++;
     // ドラムトラック( 8分音符グリッドに配置 )
