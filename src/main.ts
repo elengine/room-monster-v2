@@ -91,12 +91,12 @@ let cooldown = 2.5;
 function spawn(species: Species): void {
   const maxN = parseInt(localStorage.getItem('oheya2:max') || '5', 10) || 5;
   // モデル未読・上限到達時は【何もせず静かに抜ける】: メッセージは成功時のみ出す
-  if (monsters.length >= maxN) return;
-  if (!lib.has(species.model)) return;
+  if (monsters.length >= maxN) { recordSpawnDebug(`skip: full n=${monsters.length}`); return; }
+  if (!lib.has(species.model)) { recordSpawnDebug(`skip: no-model ${species.model}`); return; }
   const depthFar = parseFloat(localStorage.getItem('oheya2:depth') || '3');
-  // 見つけやすさ改善: 左右 x=±1.2 フル( 視野の中央60%)・奥行 z=0.2〜depthFar+0.4 に分散
-  const x = (Math.random() - 0.5) * 2.4 * 0.6;
-  const z = 0.2 + Math.random() * (depthFar + 0.2);
+  // デバッグ計測中: 前版の配置に戻す（推測変更の取り消し）
+  const x = (Math.random() - 0.5) * 2.4;
+  const z = Math.random() * (depthFar + 0.6) - depthFar;
   const root = instantiate(lib, species.model, species.scale);
   root.position.set(x, 0, z);
   // 床影
@@ -124,6 +124,13 @@ function spawn(species: Species): void {
   monsters.push(m);
   sfx('spawn');
   showStatus(`${species.name} が あらわれた！`);
+  recordSpawnDebug(`ok ${species.id} at(${x.toFixed(1)},${z.toFixed(1)}) n=${monsters.length}`);
+}
+
+/** デバッグ計測: spawn の呼ばれ方を記録して window.__spawnDebug へ (本番でも軽量・無害) */
+function recordSpawnDebug(msg: string): void {
+  const w = window as unknown as { __spawnDebug?: string[] };
+  w.__spawnDebug = [...(w.__spawnDebug ?? []), `${performance.now().toFixed(0)} ${msg}`].slice(-12);
 }
 
 function removeMonster(m: Monster): void {
@@ -141,6 +148,13 @@ function updateMonster(m: Monster, t: number, dt: number): void {
     return;
   }
   const ph = m.bornAt * 2;
+  // 放置対策: idle のまま寿命(既定30秒, 設定可)を過ぎたら自動で消える
+  // ( 上限でスポーン停止→360度どこにもいない … を防ぐ )
+  const idleTtl = Math.max(10, parseFloat(localStorage.getItem('oheya2:idle') || '30'));
+  if (t - m.bornAt > idleTtl) {
+    removeMonster(m);
+    return;
+  }
   switch (m.ref.motion) {
     case 'breathe': m.root.scale.copy(m.m0).multiplyScalar(1 + Math.sin(t * 4 + ph) * 0.13); break;
     case 'stretch': {
@@ -183,7 +197,7 @@ function updateMonster(m: Monster, t: number, dt: number): void {
 // ===================== 設定 =====================
 function wireSettings(): void {
   const settings = $('settings');
-  const bind = <K extends 'horizon' | 'pan' | 'depth' | 'flyh' | 'maxmons' | 'freq' | 'sfxv' | 'bgmv'>(
+  const bind = <K extends 'horizon' | 'pan' | 'depth' | 'flyh' | 'maxmons' | 'freq' | 'idle' | 'sfxv' | 'bgmv'>(
     id: K, key: string, def: string, label: string, on: (v: string) => void,
   ): void => {
     const el = $(id) as HTMLInputElement;
@@ -209,6 +223,7 @@ function wireSettings(): void {
   bind('flyh', 'oheya2:flyh', '3', '', () => {});
   bind('maxmons', 'oheya2:max', '5', '', () => {});
   bind('freq', 'oheya2:freq', '4', '秒', () => {});
+  bind('idle', 'oheya2:idle', '30', '秒', () => {});
   bind('sfxv', 'oheya2:sfxVol', '90', '%', (v) => setSfxVol(parseFloat(v)));
   bind('bgmv', 'oheya2:bgmVol', '60', '%', (v) => setBgmVol(parseFloat(v)));
   const grid = $('grid') as HTMLInputElement;
