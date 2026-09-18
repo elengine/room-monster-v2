@@ -55,9 +55,11 @@ function hideStatus(): void {
 
 /** HUDを毎フレーム強制表示( どの端末でも常に見える・押せる ) */
 function readyBallViewport(): void {
-  // 構えボールは HUD 表示中のみ見せる( スタート画面に残る問題の恒久対策 )
+  // 構えボールは「HUDが見えている AND タイトル/設定/図鑑が1つも見えていない」時だけ見せる。
+  // forceHud 内から毎フレーム呼ばれるため、ゲーム終了後は確実に非表示になる。
   const b = (window as unknown as { __readyBall?: HTMLElement | undefined }).__readyBall;
-  if (b) b.style.display = hud.classList.contains('hidden') ? 'none' : '';
+  const show = !hud.classList.contains('hidden') && !anyVeilVisible();
+  if (b) b.style.display = show ? '' : 'none';
 }
 
 /** ゲーム外の画面(タイトル/設定/図鑑)がどれか1つでも見えていれば true */
@@ -76,8 +78,8 @@ function forceHud(): void {
       const el = $(id as 'catch');
       if (el) { el.style.visibility = 'visible'; el.style.transform = 'translateZ(0)'; }
     }
-    readyBallViewport();
   }
+  readyBallViewport(); // HUD非表示中(タイトル等)でも毎フレーム呼んで確実に隠す
   refreshCatch();
 }
 
@@ -154,6 +156,22 @@ function updateMonster(m: Monster, t: number, dt: number): void {
       // 内部の足元合わせ(rig: position.y -= b2.min.y)が負オフセットで床めり込みに見えるのを防ぐ
       m.root.position.y = Math.max(0.8, m.m0.y * fh * 0.9) + Math.sin(t * 3 + ph) * m.m0.y * 0.25;
       break; }
+    case 'sway': {
+      // 左右にゆっくり飛行しながら前後にもゆれる( ジョーズ・プレシオン系 )
+      const fh = parseFloat(localStorage.getItem('oheya2:flyh') || '3');
+      const baseY = Math.max(0.8, m.m0.y * fh * 0.8);
+      m.root.position.y = baseY + Math.sin(t * 2.4 + ph) * m.m0.y * 0.35;
+      m.root.position.x = m.floorX + Math.sin(t * 0.9 + ph) * 0.9;
+      m.root.rotation.y = Math.sin(t * 0.9 + ph) * 0.5; // 進行方向へ顔を向ける
+      break; }
+    case 'drift': {
+      // ふわふわ浮遊 + ゆっくり上下 + 迫力のあるうようよ感( クラゲ・コウモリ )
+      const fh = parseFloat(localStorage.getItem('oheya2:flyh') || '3');
+      const baseY = Math.max(0.8, m.m0.y * fh * 0.7);
+      m.root.position.y = baseY + Math.abs(Math.sin(t * 1.7 + ph)) * m.m0.y * 0.9;
+      m.root.position.x = m.floorX + Math.sin(t * 1.1 + ph * 1.3) * 0.35;
+      m.root.rotation.z = Math.sin(t * 1.4 + ph) * 0.12;
+      break; }
   }
   // リングのズームイン・アウト
   const s = 0.5 - 0.5 * Math.cos(t * 2.6 + ph);
@@ -164,7 +182,7 @@ function updateMonster(m: Monster, t: number, dt: number): void {
 // ===================== 設定 =====================
 function wireSettings(): void {
   const settings = $('settings');
-  const bind = <K extends 'horizon' | 'pan' | 'depth' | 'flyh' | 'maxmons' | 'sfxv' | 'bgmv'>(
+  const bind = <K extends 'horizon' | 'pan' | 'depth' | 'flyh' | 'maxmons' | 'freq' | 'sfxv' | 'bgmv'>(
     id: K, key: string, def: string, label: string, on: (v: string) => void,
   ): void => {
     const el = $(id) as HTMLInputElement;
@@ -189,6 +207,7 @@ function wireSettings(): void {
   bind('depth', 'oheya2:depth', '3', '', () => {});
   bind('flyh', 'oheya2:flyh', '3', '', () => {});
   bind('maxmons', 'oheya2:max', '5', '', () => {});
+  bind('freq', 'oheya2:freq', '4', '秒', () => {});
   bind('sfxv', 'oheya2:sfxVol', '90', '%', (v) => setSfxVol(parseFloat(v)));
   bind('bgmv', 'oheya2:bgmVol', '60', '%', (v) => setBgmVol(parseFloat(v)));
   const grid = $('grid') as HTMLInputElement;
@@ -293,11 +312,14 @@ async function boot(): Promise<void> {
     const t = now / 1000;
     const dt = prev < 0 ? 0 : (now - prev) / 1000;
     prev = now;
+    // 構えボールの死活は【毎フレーム】判定( タイトル等では確実に隠す )
+    readyBallViewport();
     if (!hud.classList.contains('hidden')) {
       cooldown -= dt;
       if (cooldown <= 0) {
         spawn(rollSpecies(Math.random()));
-        cooldown = 4 + Math.random() * 4;
+        const freq = parseFloat(localStorage.getItem('oheya2:freq') || '4'); // 出現間隔の基準秒( 調整可 )
+        cooldown = Math.max(1, freq) + Math.random() * 4;
       }
       const keep: Monster[] = [];
       for (const m of monsters) { updateMonster(m, t, dt); if (monsters.includes(m)) keep.push(m); }
