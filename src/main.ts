@@ -54,6 +54,12 @@ function hideStatus(): void {
 }
 
 /** HUDを毎フレーム強制表示( どの端末でも常に見える・押せる ) */
+function readyBallViewport(): void {
+  // 構えボールは HUD 表示中のみ見せる( スタート画面に残る問題の恒久対策 )
+  const b = (window as unknown as { __readyBall?: HTMLElement | undefined }).__readyBall;
+  if (b) b.style.display = hud.classList.contains('hidden') ? 'none' : '';
+}
+
 function forceHud(): void {
   if (!hud.classList.contains('hidden')) {
     hud.style.display = 'flex';
@@ -62,6 +68,7 @@ function forceHud(): void {
       const el = $(id as 'catch');
       if (el) { el.style.visibility = 'visible'; el.style.transform = 'translateZ(0)'; }
     }
+    readyBallViewport();
   }
   refreshCatch();
 }
@@ -73,7 +80,9 @@ let cooldown = 2.5;
 
 function spawn(species: Species): void {
   const maxN = parseInt(localStorage.getItem('oheya2:max') || '5', 10) || 5;
+  // モデル未読・上限到達時は【何もせず静かに抜ける】: メッセージは成功時のみ出す
   if (monsters.length >= maxN) return;
+  if (!lib.has(species.model)) return;
   const depthFar = parseFloat(localStorage.getItem('oheya2:depth') || '3');
   const x = (Math.random() - 0.5) * 2.4;
   const z = Math.random() * (depthFar + 0.6) - depthFar;
@@ -150,7 +159,13 @@ function wireSettings(): void {
   ): void => {
     const el = $(id) as HTMLInputElement;
     const val = $(id.replace(/maxmons/, 'max') + '-val' as 'horizon-val');
-    const saved = localStorage.getItem(key) ?? def;
+    const saved = (() => { // 音量は古い0..1表記を0..100へ正規化してから復帰する
+      const raw = localStorage.getItem(key);
+      if (raw == null) return def;
+      const v = parseFloat(raw);
+      if (!isFinite(v)) return def;
+      return String(key.includes('Vol') && v > 0 && v < 1 ? Math.round(v * 100) : v);
+    })();
     el.value = saved; val.textContent = saved + label;
     on(saved);
     el.addEventListener('input', () => {
@@ -164,8 +179,8 @@ function wireSettings(): void {
   bind('depth', 'oheya2:depth', '3', '', () => {});
   bind('flyh', 'oheya2:flyh', '3', '', () => {});
   bind('maxmons', 'oheya2:max', '5', '', () => {});
-  bind('sfxv', 'oheya2:sfxVol', '90', '%', (v) => setSfxVol(parseFloat(v) / 100));
-  bind('bgmv', 'oheya2:bgmVol', '60', '%', (v) => setBgmVol(parseFloat(v) / 100));
+  bind('sfxv', 'oheya2:sfxVol', '90', '%', (v) => setSfxVol(parseFloat(v)));
+  bind('bgmv', 'oheya2:bgmVol', '60', '%', (v) => setBgmVol(parseFloat(v)));
   const grid = $('grid') as HTMLInputElement;
   grid.checked = localStorage.getItem('oheya2:grid') !== '0';
   grid.addEventListener('change', () => { field.setGridVisible(grid.checked); localStorage.setItem('oheya2:grid', grid.checked ? '1' : '0'); });
@@ -326,11 +341,14 @@ function wireThrow(): void {
   const el = field.renderer.domElement;
   el.style.touchAction = 'none';
   el.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
-  // 常駐ボール( つまめる構えボール ): 画面下中央。DOMで常時表示( HUDと同じ強制表示方式 )
+  // 常駐ボール( つまめる構えボール ): 画面下中央。表示は毎フレームの forceHud に連動させる
   const readyBall = document.createElement('div');
   readyBall.style.cssText = 'position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 84px);transform:translateX(-50%);width:64px;height:64px;border-radius:50%;z-index:45;pointer-events:none;' +
     'background:radial-gradient(circle at 35% 28%, #ffb0bc 0%, #ff4d6d 45%, #8f1230 100%);border:3px solid #fff;box-shadow:0 4px 16px rgba(0,0,0,.5), inset 0 -6px 10px rgba(0,0,0,.35);';
   document.body.appendChild(readyBall);
+  (window as unknown as { __readyBall?: HTMLElement }).__readyBall = readyBall;
+  // HUD非表示の場合は即隠す( スタート画面にボールが残る問題の対策 )
+  readyBall.style.display = hud.classList.contains('hidden') ? 'none' : '';
 
   let sx = 0; let sy = 0; let down = false;
   el.addEventListener('pointerdown', (e) => { sx = e.clientX; sy = e.clientY; down = true; });

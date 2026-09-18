@@ -10,6 +10,15 @@ let bgmMuted = false;
 let sfxVol = 0.9;
 let bgmVol = 0.5;
 
+// オフセットは slider 単位(0..100)で統一保存。互換: 古い0..1の値は×100して読む
+function readVol(key: string, def: number): number {
+  const raw = localStorage.getItem(key);
+  if (!raw) return def;
+  const v = parseFloat(raw);
+  if (!isFinite(v)) return def;
+  return v > 0 && v < 1 ? Math.round(v * 100) : Math.round(v);
+}
+
 export function unlockAudio(): void {
   if (ctx) { if (ctx.state === 'suspended') void ctx.resume(); return; }
   const AC = window.AudioContext;
@@ -21,8 +30,8 @@ export function unlockAudio(): void {
   bgmGain = ctx.createGain(); bgmGain.connect(master);
   sfxMuted = localStorage.getItem('oheya2:sfxMuted') === '1';
   bgmMuted = localStorage.getItem('oheya2:bgmMuted') === '1';
-  sfxVol = parseFloat(localStorage.getItem('oheya2:sfxVol') || '0.9');
-  bgmVol = parseFloat(localStorage.getItem('oheya2:bgmVol') || '0.6');
+  sfxVol = readVol('oheya2:sfxVol', 90) / 100;
+  bgmVol = readVol('oheya2:bgmVol', 60) / 100;
   syncGain();
 }
 
@@ -35,8 +44,8 @@ export function setSfxMuted(m: boolean): void { sfxMuted = m; localStorage.setIt
 export function isSfxMuted(): boolean { return sfxMuted; }
 export function setBgmMuted(m: boolean): void { bgmMuted = m; localStorage.setItem('oheya2:bgmMuted', m ? '1' : '0'); syncGain(); }
 export function isBgmMuted(): boolean { return bgmMuted; }
-export function setSfxVol(v: number): void { sfxVol = v; localStorage.setItem('oheya2:sfxVol', String(v)); syncGain(); }
-export function setBgmVol(v: number): void { bgmVol = v; localStorage.setItem('oheya2:bgmVol', String(v)); syncGain(); }
+export function setSfxVol(v: number): void { sfxVol = v / 100; localStorage.setItem('oheya2:sfxVol', String(Math.round(v))); syncGain(); }
+export function setBgmVol(v: number): void { bgmVol = v / 100; localStorage.setItem('oheya2:bgmVol', String(Math.round(v))); syncGain(); }
 
 type ToneOpts = { type?: OscillatorType; vol?: number; delay?: number; glide?: number };
 function toneTo(dest: GainNode | null, freq: number, dur: number, o: ToneOpts = {}): void {
@@ -109,6 +118,9 @@ export function startBGM(): void {
   ];
   // ベース(8分音符のパターン): ルート-ルート-5度-5度-ルート-オクターブ-5度-7度
   const bassPattern = [1, 1, 1.5, 1.5, 1, 2, 1.5, 1.25];
+  // ドラム: キック=1拍目と3拍目、スネア=2拍目と4拍目、ハイハット=全8分音符
+  const kickAt = (i: number): boolean => i === 0 || i === 4;
+  const snareAt = (i: number): boolean => i === 2 || i === 6;
   let bar = 0;
   const playBar = (): void => {
     if (!ctx) return;
@@ -138,6 +150,47 @@ export function startBGM(): void {
       osc.start(t0 + i * beat); osc.stop(t0 + i * beat + beat);
     }
     bar++;
+    // ドラムトラック( 8分音符グリッドに配置 )
+    for (let i = 0; i < 8; i++) {
+      const dt = i * beat / 2;
+      if (kickAt(i)) { // キック: 低域のシンプルなパンチ
+        const osc = ctx.createOscillator(); const g = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150, t0 + dt);
+        osc.frequency.exponentialRampToValueAtTime(45, t0 + dt + 0.12);
+        g.gain.setValueAtTime(0.14, t0 + dt);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.16);
+        osc.connect(g); g.connect(bgmGain ?? master ?? ctx.destination);
+        osc.start(t0 + dt); osc.stop(t0 + dt + 0.2);
+      }
+      if (snareAt(i)) { // スネア: ノイズの短いパチッ
+        const len = Math.floor(ctx.sampleRate * 0.14);
+        const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let k = 0; k < len; k++) d[k] = (Math.random() * 2 - 1) * (1 - k / len);
+        const src = ctx.createBufferSource(); src.buffer = buf;
+        const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1600;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.09, t0 + dt);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.14);
+        src.connect(f).connect(g); g.connect(bgmGain ?? master ?? ctx.destination);
+        src.start(t0 + dt);
+      }
+      // ハイハット: 全8分音符( 偶数番目はやや強く )
+      {
+        const len = Math.floor(ctx.sampleRate * 0.05);
+        const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+        const dd = buf.getChannelData(0);
+        for (let k = 0; k < len; k++) dd[k] = (Math.random() * 2 - 1) * (1 - k / len);
+        const s2 = ctx.createBufferSource(); s2.buffer = buf;
+        const f2 = ctx.createBiquadFilter(); f2.type = 'highpass'; f2.frequency.value = 7000;
+        const g2 = ctx.createGain();
+        g2.gain.setValueAtTime(i % 2 === 0 ? 0.05 : 0.035, t0 + dt);
+        g2.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.05);
+        s2.connect(f2).connect(g2); g2.connect(bgmGain ?? master ?? ctx.destination);
+        s2.start(t0 + dt);
+      }
+    }
   };
   playBar();
   bgmTimer = window.setInterval(playBar, beat * 8 * 1000);
