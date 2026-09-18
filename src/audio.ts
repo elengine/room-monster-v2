@@ -196,7 +196,8 @@ export function startBGM(): void {
     }
   };
   playBar();
-  bgmTimer = window.setInterval(playBar, beat * 8 * 1000);
+  // 1小節= 8分音符8個分 = beat*4 秒。beat*8 にすると半分が無音になる
+  bgmTimer = window.setInterval(playBar, beat * 4 * 1000);
 }
 
 export function stopBGM(): void {

@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { GameField } from './game';
 import { SPECIES, rollSpecies, type Species } from './species';
 import { loadAllModels, instantiate } from './rig';
-import { recordCatch, recordFlee, loadDex, totalCaught } from './dex';
+import { recordCatch, recordFlee, loadDex, totalCaught, clearDex } from './dex';
 import { startGyro, requestGyroPermission, setHorizon, setPan, getHorizon, getPan } from './gyro';
 import { sfx, startBGM, stopBGM, unlockAudio, setSfxMuted, setBgmMuted, setSfxVol, setBgmVol } from './audio';
 
@@ -58,6 +58,14 @@ function readyBallViewport(): void {
   // 構えボールは HUD 表示中のみ見せる( スタート画面に残る問題の恒久対策 )
   const b = (window as unknown as { __readyBall?: HTMLElement | undefined }).__readyBall;
   if (b) b.style.display = hud.classList.contains('hidden') ? 'none' : '';
+}
+
+/** ゲーム外の画面(タイトル/設定/図鑑)がどれか1つでも見えていれば true */
+function anyVeilVisible(): boolean {
+  if (!$('title').classList.contains('hidden')) return true;
+  if (!$('settings').classList.contains('hidden')) return true;
+  if (!$('dex').classList.contains('hidden')) return true;
+  return false;
 }
 
 function forceHud(): void {
@@ -142,7 +150,9 @@ function updateMonster(m: Monster, t: number, dt: number): void {
       break; }
     case 'fly': {
       const fh = parseFloat(localStorage.getItem('oheya2:flyh') || '3');
-      m.root.position.y = m.m0.y * fh + Math.sin(t * 3 + ph) * m.m0.y * 0.3;
+      // 空中位置: モデル高さ(m0スケール)と設定値から絶対Yを決める。
+      // 内部の足元合わせ(rig: position.y -= b2.min.y)が負オフセットで床めり込みに見えるのを防ぐ
+      m.root.position.y = Math.max(0.8, m.m0.y * fh * 0.9) + Math.sin(t * 3 + ph) * m.m0.y * 0.25;
       break; }
   }
   // リングのズームイン・アウト
@@ -268,6 +278,15 @@ async function boot(): Promise<void> {
   });
   $('dexbtn').addEventListener('click', () => { sfx('dex'); hideStatus(); renderDex(); $('dex').classList.remove('hidden'); });
   $('dex-close').addEventListener('click', () => { sfx('tap'); hideStatus(); $('dex').classList.add('hidden'); });
+  $('dex-clear').addEventListener('click', () => {
+    // 誤クリック防止: 確認ダイアログを挟んでから消す
+    if (window.confirm('ずかんの きろくを ぜんぶ消します。よろしいですか？')) {
+      clearDex();
+      refreshCatch();
+      renderDex();
+      sfx('dex');
+    }
+  });
 
   let prev = -1;
   field.renderer.setAnimationLoop((now) => {
@@ -383,9 +402,8 @@ function wireThrow(): void {
     drag = null;
     if (!start) return;
     const dx = e.clientX - start.x; const dy = e.clientY - start.y;
-    resetBall();
-    if (Math.hypot(dx, dy) < 24 || dy > 0) return; // 小さすぎ/下方向は投げない
-    // 指を離した先へ一番近いターゲットへベジエでボールを飛ばす
+    if (Math.hypot(dx, dy) < 24 || dy > 0) { resetBall(); return; } // 小さすぎ/下方向は捩らず戻す
+    // 指を離した先へ一番近いターゲットへ【DOMボールそのもの】をベジエで飛ばす
     let best: Monster | null = null; let bd = 300;
     const rect = el.getBoundingClientRect();
     for (const m of monsters) {
@@ -399,33 +417,32 @@ function wireThrow(): void {
       if (d < bd) { bd = d; best = m; }
     }
     if (best) {
-      // 画面座標の指位置を3D空間から出して登場位置へつなげる
-      const from = field.camera.position.clone().add(new THREE.Vector3(0, -0.4, -0.5));
-      const to = best.root.position.clone(); to.y += best.ref.scale;
-      const mid = from.clone().lerp(to, 0.5); mid.y += 1.0;
-      const ball = new THREE.Mesh(
-        new THREE.SphereGeometry(0.09, 18, 14),
-        new THREE.MeshStandardMaterial({ color: 0xff2d6f, roughness: 0.35, metalness: 0.1 }));
-      ball.position.copy(from);
-      field.scene.add(ball);
       sfx('throw');
+      const x0 = start.x; const y0 = window.innerHeight - start.y; // bottom 座標系
+      const x1 = e.clientX; const y1 = window.innerHeight - e.clientY;
+      // 弧を描く: 中間点を上方へ
+      const xM = (x0 + x1) / 2; const yM = Math.max(y0, y1) + 180;
       const t0 = performance.now();
       const fly = (): void => {
-        const k = Math.min(1, (performance.now() - t0) / 550);
-        const a = from.clone().lerp(mid, k);
-        const b = mid.clone().lerp(to, k);
-        ball.position.copy(a.lerp(b, k));
-        if (k < 1) requestAnimationFrame(fly);
+        const k = Math.min(1, (performance.now() - t0) / 500);
+        const ax = x0 + (xM - x0) * k, ay = y0 + (yM - y0) * k;
+        const bx = xM + (x1 - xM) * k, by = yM + (y1 - yM) * k;
+        readyBall.style.left = `${ax + (bx - ax) * k - 34}px`;
+        readyBall.style.bottom = `${ay + (by - ay) * k - 34}px`;
+        readyBall.style.transform = 'none';
+        if (k < 1) { requestAnimationFrame(fly); }
         else {
-          field.scene.remove(ball);
           const ringR = best.ring.scale.x / best.ref.scale;
           const quality = ringR <= 0.7 ? (ringR <= 0.45 ? 'EXCELLENT' : 'GREAT') : ringR <= 1.0 ? 'NICE' : 'OK';
           const mult = quality === 'EXCELLENT' ? 1.8 : quality === 'GREAT' ? 1.5 : quality === 'NICE' ? 1.25 : 1;
           const base = (best.ref.rarity === 'secret' ? 0.25 : best.ref.rarity === 'rare' ? 0.4 : [0, 0.68, 0.55, 0.45][best.ref.tier] ?? 0.5);
           onThrowResult(best, Math.random() < Math.min(0.95, base * mult));
+          resetBall();
         }
       };
       void fly();
+    } else {
+      resetBall();
     }
   });
 }

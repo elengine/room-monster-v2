@@ -13,6 +13,11 @@ function save(d: Record<string, DexEntry>): void {
   localStorage.setItem(KEY, JSON.stringify(d));
 }
 
+/** 図鑑を全消去( 確認ダイアログは呼び出し側で ) */
+export function clearDex(): void {
+  localStorage.removeItem(KEY);
+}
+
 export function recordCatch(id: string): void {
   const d = loadDex();
   const e = d[id] ?? { got: 0, fled: 0 };
