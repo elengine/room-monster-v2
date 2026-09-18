@@ -30,13 +30,35 @@ export function instantiate(lib: Map<string, THREE.Group>, model: string, scale:
   const src = lib.get(model);
   if (!src) return new THREE.Group();
   const clone = SkeletonUtils.clone(src) as THREE.Group;
+  // skinnedMesh の bounding box が破綻(異常に巨大)するケースがあり
+  // scale/h ≒ 0.00 で「存在するのに見えない」になっていた。
+  // → 全メッシュの bbox を明示再計算してから正規化する( 実測 s=0.00 の修正 )
+  clone.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh) {
+      mesh.geometry.computeBoundingBox();
+      mesh.geometry.computeBoundingSphere();
+    }
+  });
   const box = new THREE.Box3().setFromObject(clone);
   const size = new THREE.Vector3();
   box.getSize(size);
-  const h = Math.max(size.x, size.y, size.z) || 1;
+  let h = Math.max(size.x, size.y, size.z);
+  // それでも破綻値(0 or 20m超)のときはジオメトリ bbox の直接和でフォールバック
+  if (!isFinite(h) || h <= 0.001 || h > 20) {
+    h = 1; // 正規化を諦めて等倍( 必ず見える状態を優先 )
+    let maxR = 0;
+    clone.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (mesh.isMesh && mesh.geometry.boundingSphere) {
+        maxR = Math.max(maxR, mesh.geometry.boundingSphere.radius * (mesh.scale.y || 1));
+      }
+    });
+    if (maxR > 0.001 && maxR < 50) h = maxR * 2;
+  }
   clone.scale.setScalar(scale / h);
   // 足元を地面に合わせる
   const b2 = new THREE.Box3().setFromObject(clone);
-  clone.position.y -= b2.min.y;
+  if (isFinite(b2.min.y)) clone.position.y -= b2.min.y;
   return clone;
 }
