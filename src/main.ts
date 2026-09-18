@@ -306,9 +306,32 @@ async function boot(): Promise<void> {
   // モデル読込: 戻り値نامجroーバルlibへ( 戻り値を捨てるとリングだけになる )
   void loadAllModels((d, n) => {
     if (d === n) showStatus('じゅんび かんりょう！');
-  }).then((m) => {
+  }).then(async (m) => {
     for (const [k, v] of m) lib.set(k, v);
     (window as unknown as { __modelLib?: unknown }).__modelLib = lib; // QA用
+    // QA: 全モデルを instantiate してスケールと実寸を検査する hook( 実測確認用 )
+    const { instantiate: inst } = await import('./rig');
+    (window as unknown as { __testInstantiate?: () => string[] }).__testInstantiate = () => {
+      const rows: string[] = [];
+      for (const s of SPECIES) {
+        const tpl = lib.get(s.model);
+        let tplY = -9; let cloneY = -9; let tplH = -9;
+        if (tpl) {
+          // wrapper ではなく wrapper.children[0](単位化済み src)を測る
+          const unit = (tpl.children[0] ?? tpl) as THREE.Group;
+          const b0 = new THREE.Box3().setFromObject(unit);
+          tplY = b0.min.y; tplH = b0.max.y - b0.min.y;
+        }
+        const c = inst(lib, s.model, s.scale);
+        c.updateWorldMatrix(true, true);
+        const box = new THREE.Box3().setFromObject(c);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        cloneY = size.y;
+        rows.push(`${s.model}: tpl[0..${tplH.toFixed(2)}] minY=${tplY.toFixed(2)} clone(scale=${c.scale.x.toFixed(2)}) H=${cloneY.toFixed(2)}m`);
+      }
+      return rows;
+    };
   });
   // QA/調査用: scene と monsters を公開( 本番軽量で無害 )
   (window as unknown as { __qaScene?: unknown }).__qaScene = () => field.scene;
