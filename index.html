@@ -5,30 +5,126 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#0b1020" />
   <title>おへやモンスター</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Noto+Sans+JP:wght@600;800&display=swap" rel="stylesheet" />
   <style>
     html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0b1020;
-      font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif; color: #dfe7ff; }
+      font-family: 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', sans-serif; color: #dfe7ff; }
     #app { position: fixed; inset: 0; z-index: 1; }
     #app canvas { display: block; width: 100%; height: 100%; }
     .veil { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
-      justify-content: center; text-align: center; gap: 18px; background: #0b1020; z-index: 20; padding: 24px; }
-    .veil h1 { font-size: 40px; margin: 0; letter-spacing: 2px; }
-    .big-btn { font-size: 20px; font-weight: 700; color: #0b1020; background: linear-gradient(135deg,#7cf0ff,#4f8bff);
-      border: none; border-radius: 999px; padding: 16px 44px; box-shadow: 0 6px 24px rgba(79,139,255,.45); }
+      justify-content: center; text-align: center; gap: 20px; background: radial-gradient(120% 90% at 50% 0%, #1a1345 0%, #0b1020 70%);
+      z-index: 20; padding: 24px; }
+    .title-en { font-family: 'Orbitron', sans-serif; font-size: 13px; opacity: .6; letter-spacing: 5px; text-transform: uppercase; }
+    .veil h1 { font-size: 42px; margin: 0; letter-spacing: 2px;
+      background: linear-gradient(135deg,#9df3ff,#7a8bff); -webkit-background-clip: text; background-clip: text; color: transparent;
+      filter: drop-shadow(0 0 18px rgba(120,240,255,.35)); }
+    .ver { font-size: 12px; opacity: .55; }
+    .big-btn { font-size: 21px; font-weight: 800; color: #06263a; background: linear-gradient(135deg,#8ef2ff,#4f8bff);
+      border: none; border-radius: 999px; padding: 17px 46px; cursor: pointer; font-family: inherit;
+      box-shadow: 0 6px 26px rgba(79,139,255,.5), inset 0 -3px 6px rgba(0,0,0,.18);
+      transition: transform .12s ease, box-shadow .12s ease; }
+    .big-btn:active { transform: translateY(2px) scale(.98); box-shadow: 0 3px 14px rgba(79,139,255,.4); }
+    .big-btn.secondary { color: #dfe7ff; background: linear-gradient(135deg,#5a6b8c,#39435e); box-shadow: 0 4px 18px rgba(40,60,110,.5); }
     .hud { position: fixed; inset: 0; z-index: 50; pointer-events: none; display: flex;
-      flex-direction: column; justify-content: space-between; padding: 12px 14px; }
-    .hud button { pointer-events: auto; }
+      flex-direction: column; justify-content: space-between;
+      padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 12px);
+      transform: translateZ(0); }
+    .hud button { pointer-events: auto; cursor: pointer; }
+    .hud button:active { transform: scale(.94); }
+    .chip { pointer-events: auto; background: linear-gradient(135deg,#241a54,#4a2f8f); border: 1px solid rgba(255,215,120,.65);
+      border-radius: 16px; padding: 10px 18px; font-size: 22px; font-weight: 800; color: #ffe9a8; letter-spacing: .5px;
+      box-shadow: 0 0 20px rgba(255,190,60,.4), inset 0 0 12px rgba(255,230,150,.15); }
+    .icon-btn { width: 54px; height: 54px; border-radius: 50%; color: #fff; font-size: 25px;
+      display: flex; align-items: center; justify-content: center; border: 2px solid rgba(255,255,255,.6); font-family: inherit;
+      box-shadow: 0 3px 12px rgba(0,0,0,.45), 0 0 18px rgba(120,240,255,.4); transition: transform .12s ease; }
+    #sound { background: radial-gradient(circle at 35% 30%, #35c8d6, #1e6bd1); }
+    #dexbtn { background: radial-gradient(circle at 35% 30%, #8d7cf5, #4348c8); }
+    #exit { background: radial-gradient(circle at 35% 30%, #ff8a7a, #c0284a); font-size: 28px; }
+    .status { position: fixed; left: 50%; top: 12%; transform: translateX(-50%) translateZ(0); display: none; pointer-events: none;
+      text-align: center; font-size: 26px; font-weight: 900; letter-spacing: 1px; line-height: 1.4;
+      color: #fff; text-shadow: 0 0 14px rgba(120,240,255,.85), 0 1px 3px #000;
+      padding: 12px 28px; border-radius: 18px; max-width: 86%;
+      background: linear-gradient(135deg, rgba(24,22,58,.65), rgba(70,36,100,.65));
+      border: 2px solid rgba(120,240,255,.55); backdrop-filter: blur(4px); z-index: 55; }
+    .status.show { display: block; animation: pop .3s ease; }
+    .status.bad { color: #ffc0b8; border-color: rgba(255,90,80,.78);
+      background: linear-gradient(135deg,rgba(70,12,22,.7),rgba(130,30,22,.7));
+      box-shadow: 0 0 26px rgba(255,80,70,.5); text-shadow: 0 0 12px rgba(255,120,90,.9),0 1px 2px #000; }
+    @keyframes pop { 0% { transform: translateX(-50%) scale(.6); opacity: 0 } 100% { transform: translateX(-50%) scale(1); opacity: 1 } }
+    .panel { width: 100%; max-width: 420px; background: linear-gradient(135deg,rgba(18,12,48,.5),rgba(30,20,70,.5));
+      border: 1px solid rgba(124,240,255,.35); border-radius: 20px; padding: 16px 20px; backdrop-filter: blur(8px);
+      max-height: 64vh; overflow-y: auto; overscroll-behavior: contain; }
+    .set-row { display: flex; justify-content: space-between; align-items: center; font-size: 16px; margin: 10px 0 4px; }
+    .set-row b { font-size: 17px; color: #9df3ff; min-width: 46px; text-align: right; }
+    .panel input[type=range] { width: 100%; accent-color: #7cf0ff; }
+    .panel .rowline { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      padding: 9px 4px; border-bottom: 1px solid rgba(124,240,255,.12); font-size: 15px; }
+    .panel .rowline .dot { width: 15px; height: 15px; border-radius: 50%; box-shadow: 0 0 9px currentColor; display: inline-block; }
+    .panel .rowline .num { opacity: .85; }
+    .panel .rowline.hide { opacity: .45; }
     .hidden { display: none !important; }
+    @media (max-width: 600px) { .status { font-size: 21px; } .chip { font-size: 18px; padding: 8px 14px; } }
   </style>
 </head>
 <body>
   <div id="app"></div>
+
+  <!-- タイトル -->
   <div id="title" class="veil">
+    <div class="title-en">Oheya Monster</div>
     <h1>おへやモンスター</h1>
-    <div id="ver"></div>
-    <button id="start">スタート</button>
-    <button id="settings-btn" class="big-btn" style="background:linear-gradient(135deg,#5a6b8c,#39435e);color:#fff">設定</button>
+    <div class="ver" id="ver"></div>
+    <button id="start" class="big-btn">スタート</button>
+    <button id="settings-btn" class="big-btn secondary">設定</button>
   </div>
+
+  <!-- 設定 -->
+  <div id="settings" class="veil hidden">
+    <div class="title-en">Settings</div>
+    <h1 style="font-size:32px">設定</h1>
+    <div class="panel">
+      <div class="set-row"><span>地平線（縦）</span><b id="horizon-val">25°</b></div>
+      <input type="range" id="horizon" min="0" max="50" step="1" value="25" />
+      <div class="set-row"><span>左右パンニング</span><b id="pan-val">0°</b></div>
+      <input type="range" id="pan" min="-40" max="40" step="1" value="0" />
+      <div class="set-row"><span>出現の奥行き</span><b id="depth-val">3</b></div>
+      <input type="range" id="depth" min="1" max="6" step="1" value="3" />
+      <div class="set-row"><span>飛ぶ高さ</span><b id="flyh-val">3</b></div>
+      <input type="range" id="flyh" min="1" max="6" step="1" value="3" />
+      <div class="set-row"><span>同時出現上限</span><b id="max-val">5</b></div>
+      <input type="range" id="maxmons" min="1" max="10" step="1" value="5" />
+      <div class="set-row"><span>床のマス目</span><input type="checkbox" id="grid" checked style="width:22px;height:22px;accent-color:#7cf0ff" /></div>
+      <div class="set-row"><span>効果音の音量</span><b id="sfxv-val">90%</b></div>
+      <input type="range" id="sfxv" min="0" max="100" step="5" value="90" />
+      <div class="set-row"><span>効果音トグル</span><input type="checkbox" id="sfxt" checked style="width:22px;height:22px;accent-color:#7cf0ff" /></div>
+      <div class="set-row"><span>BGMの音量</span><b id="bgmv-val">60%</b></div>
+      <input type="range" id="bgmv" min="0" max="100" step="5" value="60" />
+      <div class="set-row"><span>BGMトグル</span><input type="checkbox" id="bgmt" checked style="width:22px;height:22px;accent-color:#7cf0ff" /></div>
+    </div>
+    <button id="settings-done" class="big-btn">閉じる</button>
+  </div>
+
+  <!-- 図鑑 -->
+  <div id="dex" class="veil hidden">
+    <div class="title-en">Pokédex</div>
+    <h1 style="font-size:30px">ずかん</h1>
+    <div class="panel"><div id="dex-list"></div></div>
+    <button id="dex-close" class="big-btn">とじる</button>
+  </div>
+
+  <!-- HUD(ゲーム中) -->
+  <div id="hud" class="hud hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div class="chip" id="catch">つかまえた: 0</div>
+      <button id="sound" class="icon-btn">♪</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <button id="dexbtn" class="icon-btn">図</button>
+      <button id="exit" class="icon-btn">✕</button>
+    </div>
+  </div>
+  <div class="status" id="status"></div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

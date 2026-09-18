@@ -1,86 +1,347 @@
-// おへやモンスター v2 — エントリ: HUD常時表示(毎フレーム強制)/起動/figen情報
-import { GameField } from './game';
+// おへやモンスター v2 — エントリ: 起動/モンスター出現/設定/図鑑/HUD強制
 import RAPIER from '@dimforge/rapier3d-compat';
+import * as THREE from 'three';
+import { GameField } from './game';
+import { SPECIES, rollSpecies, type Species } from './species';
+import { loadAllModels, instantiate } from './rig';
+import { recordCatch, recordFlee, loadDex, totalCaught } from './dex';
+import { startGyro, requestGyroPermission, setHorizon, setPan, getHorizon, getPan } from './gyro';
+import { sfx, startBGM, stopBGM, unlockAudio, setSfxMuted, setBgmMuted, setSfxVol, setBgmVol } from './audio';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+const DEG = THREE.MathUtils.degToRad;
 
+type Monster = {
+  root: THREE.Group;
+  ring: THREE.Mesh;
+  ref: Species;
+  floorX: number;
+  floorZ: number;
+  bornAt: number;
+  state: 'idle' | 'fleeing';
+  fleeDir: number;
+  m0: THREE.Vector3;
+};
+
+let field: GameField; // boot() 内で await RAPIER.init() 後に生成
+let gestureWired = false;
+const hud = $('hud');
+let statusTimer: number | null = null;
+
+function showStatus(msg: string, bad = false): void {
+  const el = $('status');
+  if (!msg) { el.classList.remove('show', 'bad'); el.textContent = ''; return; }
+  if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+  el.textContent = msg;
+  el.classList.toggle('bad', bad);
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
+  statusTimer = window.setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+function refreshCatch(): void {
+  $('catch').textContent = `つかまえた: ${totalCaught()}`;
+}
+
+/** HUDを毎フレーム強制表示( どの端末でも常に見える・押せる ) */
+function forceHud(): void {
+  if (!hud.classList.contains('hidden')) {
+    hud.style.display = 'flex';
+    hud.style.zIndex = '50';
+    for (const id of ['catch', 'sound', 'dexbtn', 'exit']) {
+      const el = $(id as 'catch');
+      if (el) { el.style.visibility = 'visible'; el.style.transform = 'translateZ(0)'; }
+    }
+  }
+  refreshCatch();
+}
+
+// ===================== モンスター管理 =====================
+const lib = new Map<string, THREE.Group>();
+const monsters: Monster[] = [];
+let cooldown = 2.5;
+
+function spawn(species: Species): void {
+  const maxN = parseInt(localStorage.getItem('oheya2:max') || '5', 10) || 5;
+  if (monsters.length >= maxN) return;
+  const depthFar = parseFloat(localStorage.getItem('oheya2:depth') || '3');
+  const x = (Math.random() - 0.5) * 2.4;
+  const z = Math.random() * (depthFar + 0.6) - depthFar;
+  const root = instantiate(lib, species.model, species.scale);
+  root.position.set(x, 0, z);
+  // 床影
+  const sh = new THREE.Mesh(
+    new THREE.CircleGeometry(species.scale * 0.6, 20),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
+  sh.rotation.x = -Math.PI / 2; sh.position.y = 0.004;
+  root.add(sh);
+  // 正面の当たり判定リング
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.62, 1.0, 40),
+    new THREE.MeshBasicMaterial({ color: 0x3eff6a, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+  ring.position.set(0, species.scale * 0.75, species.scale * 0.42);
+  ring.scale.setScalar(species.scale * 0.6);
+  root.add(ring);
+
+  field.scene.add(root);
+  const m: Monster = {
+    root, ring, ref: species, floorX: x, floorZ: z,
+    bornAt: performance.now() / 1000, state: 'idle',
+    fleeDir: Math.random() < 0.5 ? -1 : 1,
+    m0: root.scale.clone(),
+  };
+  root.userData.monster = m;
+  monsters.push(m);
+  sfx('spawn');
+  showStatus(`${species.name} が あらわれた！`);
+}
+
+function removeMonster(m: Monster): void {
+  field.scene.remove(m.root);
+  monsters.splice(monsters.indexOf(m), 1);
+}
+
+function updateMonster(m: Monster, t: number, dt: number): void {
+  if (m.state === 'fleeing') {
+    // 逃走= 左右に跳ねながら約1秒でフレームアウト(縮小なし)
+    m.root.rotation.y += dt * 8;
+    m.root.position.x += m.fleeDir * dt * 3.4;
+    m.root.position.y = Math.abs(Math.sin(t * 13)) * m.m0.y * 0.55;
+    if (t - m.bornAt > 6 || Math.abs(m.root.position.x - m.floorX) > 4) removeMonster(m);
+    return;
+  }
+  const ph = m.bornAt * 2;
+  switch (m.ref.motion) {
+    case 'breathe': m.root.scale.copy(m.m0).multiplyScalar(1 + Math.sin(t * 4 + ph) * 0.13); break;
+    case 'stretch': {
+      const p = Math.sin(t * 5 + ph);
+      m.root.scale.set(m.m0.x * (1 + 0.13 * p), m.m0.y * (1 - 0.24 * p), m.m0.z * (1 + 0.13 * p));
+      break; }
+    case 'hop': {
+      m.root.position.x = m.floorX + Math.sin(t * 2.2 + ph) * 0.28;
+      m.root.position.y = Math.abs(Math.sin(t * 6 + ph)) * m.m0.y * 0.95;
+      break; }
+    case 'fly': {
+      const fh = parseFloat(localStorage.getItem('oheya2:flyh') || '3');
+      m.root.position.y = m.m0.y * fh + Math.sin(t * 3 + ph) * m.m0.y * 0.3;
+      break; }
+  }
+  // リングのズームイン・アウト
+  const s = 0.5 - 0.5 * Math.cos(t * 2.6 + ph);
+  m.ring.scale.setScalar(m.ref.scale * (0.62 + s * 1.1));
+  (m.ring.material as THREE.MeshBasicMaterial).color.setHSL((1 - s) * 0.33, 0.9, 0.55);
+}
+
+// ===================== 設定 =====================
+function wireSettings(): void {
+  const settings = $('settings');
+  const bind = <K extends 'horizon' | 'pan' | 'depth' | 'flyh' | 'maxmons' | 'sfxv' | 'bgmv'>(
+    id: K, key: string, def: string, label: string, on: (v: string) => void,
+  ): void => {
+    const el = $(id) as HTMLInputElement;
+    const val = $(id.replace(/maxmons/, 'max') + '-val' as 'horizon-val');
+    const saved = localStorage.getItem(key) ?? def;
+    el.value = saved; val.textContent = saved + label;
+    on(saved);
+    el.addEventListener('input', () => {
+      val.textContent = el.value + label;
+      localStorage.setItem(key, el.value);
+      on(el.value);
+    });
+  };
+  bind('horizon', 'oheya2:horizon', '25', '°', (v) => setHorizon(parseFloat(v) || 25));
+  bind('pan', 'oheya2:pan', '0', '°', (v) => setPan(parseFloat(v) || 0));
+  bind('depth', 'oheya2:depth', '3', '', () => {});
+  bind('flyh', 'oheya2:flyh', '3', '', () => {});
+  bind('maxmons', 'oheya2:max', '5', '', () => {});
+  bind('sfxv', 'oheya2:sfxVol', '90', '%', (v) => setSfxVol(parseFloat(v) / 100));
+  bind('bgmv', 'oheya2:bgmVol', '60', '%', (v) => setBgmVol(parseFloat(v) / 100));
+  const grid = $('grid') as HTMLInputElement;
+  grid.checked = localStorage.getItem('oheya2:grid') !== '0';
+  grid.addEventListener('change', () => { field.setGridVisible(grid.checked); localStorage.setItem('oheya2:grid', grid.checked ? '1' : '0'); });
+  field.setGridVisible(localStorage.getItem('oheya2:grid') !== '0');
+  const sfxt = $('sfxt') as HTMLInputElement;
+  sfxt.checked = localStorage.getItem('oheya2:sfxMuted') !== '1';
+  sfxt.addEventListener('change', () => { setSfxMuted(!sfxt.checked); localStorage.setItem('oheya2:sfxMuted', sfxt.checked ? '0' : '1'); });
+  const bgmt = $('bgmt') as HTMLInputElement;
+  bgmt.checked = localStorage.getItem('oheya2:bgmMuted') !== '1';
+  bgmt.addEventListener('change', () => { setBgmMuted(!bgmt.checked); if (!bgmt.checked) startBGM(); }, );
+
+  $('settings-btn').addEventListener('click', () => { unlockAudio(); sfx('tap'); settings.classList.remove('hidden'); });
+  $('settings-done').addEventListener('click', () => { sfx('tap'); settings.classList.add('hidden'); });
+}
+
+// ===================== 図鑑 =====================
+function renderDex(): void {
+  const d = loadDex();
+  const secretKnown = Object.keys(d).some((k) => k === 'shadow');
+  $('dex-list').innerHTML = SPECIES
+    .filter((s) => s.rarity !== 'secret' || secretKnown)
+    .map((s) => {
+      const e = d[s.id] ?? { got: 0, fled: 0 };
+      const known = e.got > 0;
+      const tag = s.rarity === 'rare' ? ' ★レア' : s.rarity === 'secret' ? ' ★シークレット' : '';
+      return `<div class="rowline ${known ? '' : 'hide'}">
+        <span><span class="dot" style="background:#${s.color.toString(16).padStart(6,'0')};color:#${s.color.toString(16).padStart(6,'0')}"></span>
+        <b>${known ? s.name : '？？？'}</b>${tag}</span>
+        <span class="num">${known ? `ゲット ${e.got}・にげ ${e.fled}` : 'みつからない'}</span></div>`;
+    }).join('');
+}
+
+// ===================== ゲット/逃げ =====================
+function onThrowResult(m: Monster, caught: boolean): void {
+  if (caught) {
+    recordCatch(m.ref.id);
+    sfx('catch');
+    showStatus(`${m.ref.name} を つかまえた！`);
+    removeMonster(m);
+  } else {
+    recordFlee(m.ref.id);
+    sfx('flee');
+    m.state = 'fleeing';
+    showStatus(`${m.ref.name} は にげてしまった…`, true);
+  }
+}
+
+// ===================== 起動 =====================
 async function boot(): Promise<void> {
-  // Rapier物理のWASMを先に初期化（これを怠ると new World が例外で boot が止まる）
   await RAPIER.init();
+  field = new GameField($('app'));
   $('ver').textContent = `ver ${__APP_VERSION__}`;
-
-  const field = new GameField($('app'));
   field.onResize();
   addEventListener('resize', () => field.onResize());
   addEventListener('orientationchange', () => setTimeout(() => field.onResize(), 250));
+  wireSettings();
+  refreshCatch();
 
-  // HUDをJSから毎フレーム強制表示(Android/iPad問わず常に見える・押せる)
-  const hud = document.createElement('div');
-  hud.className = 'hud';
-  hud.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <div id="catch" style="pointer-events:auto;background:linear-gradient(135deg,#241a54,#4a2f8f);border-radius:16px;padding:10px 18px;font-size:22px;font-weight:800;color:#ffe9a8">つかまえた: 0</div>
-      <button id="sound" style="pointer-events:auto;width:52px;height:52px;border-radius:50%;font-size:24px;background:#35c8d6;border:2px solid #fff;color:#fff">♪</button>
-    </div>
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <button id="dex" style="pointer-events:auto;width:52px;height:52px;border-radius:50%;font-size:20px;background:#5a6b8c;border:2px solid #fff;color:#fff">図</button>
-      <button id="exit" style="pointer-events:auto;width:52px;height:52px;border-radius:50%;font-size:26px;background:#ff8a7a;border:2px solid #fff;color:#fff">✕</button>
-    </div>`;
-  document.body.appendChild(hud);
-  hud.classList.add('hidden');
-  let n = 0;
-  const forceHud = () => {
+  loadAllModels((d, n) => { if (d === n) showStatus('じゅんび かんりょう！'); });
+
+  $('start').addEventListener('click', () => { void startGame(); });
+  $('exit').addEventListener('click', exitGame);
+  $('sound').addEventListener('click', () => { showStatus('音切り替えは設定画面から'); sfx('tap'); });
+  $('dexbtn').addEventListener('click', () => { sfx('dex'); renderDex(); $('dex').classList.remove('hidden'); });
+  $('dex-close').addEventListener('click', () => { sfx('tap'); $('dex').classList.add('hidden'); });
+
+  let prev = -1;
+  field.renderer.setAnimationLoop((now) => {
+    const t = now / 1000;
+    const dt = prev < 0 ? 0 : (now - prev) / 1000;
+    prev = now;
     if (!hud.classList.contains('hidden')) {
-      hud.style.display = 'flex';
-      $('catch').style.display = 'block';
-    }
-    $('catch').textContent = `つかまえた: ${n}`;
-  };
-  forceHud();
-
-  let stream: MediaStream | null = null;
-  const start = async (): Promise<void> => {
-    unlock();
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } }, audio: false });
-      const video = document.createElement('video');
-      video.autoplay = true; video.muted = true; video.playsInline = true;
-      video.srcObject = stream;
-      await video.play().catch(() => { /* 次フレームで再生 */ });
-      document.body.appendChild(video); // VideoTextureに使うだけ(DOMは非表示)
-      video.style.position = 'fixed'; video.style.inset = '0'; video.style.opacity = '0'; video.style.pointerEvents = 'none';
-      field.setVideoBackground(video);
-    } catch (e) {
-      console.warn('[oheya2] カメラ失敗（映像なしで実行）', e);
-    }
-    $('title').classList.add('hidden');
-    hud.classList.remove('hidden');
-    forceHud();
-
-    let prev = -1;
-    field.renderer.setAnimationLoop((now) => {
-      const dt = prev < 0 ? 0 : (now - prev) / 1000;
-      prev = now;
+      cooldown -= dt;
+      if (cooldown <= 0) {
+        spawn(rollSpecies(Math.random()));
+        cooldown = 4 + Math.random() * 4;
+      }
+      const keep: Monster[] = [];
+      for (const m of monsters) { updateMonster(m, t, dt); if (monsters.includes(m)) keep.push(m); }
       field.render(dt);
-      forceHud(); // 毎フレームHUD表示を強制
-    });
-  };
-  $('start').addEventListener('click', () => { void start(); });
-  $('exit').addEventListener('click', () => {
-    $('title').classList.remove('hidden');
-    hud.classList.add('hidden');
-    stream?.getTracks().forEach((t) => t.stop());
-    stream = null;
-    field.renderer.setAnimationLoop(null);
+      if (gestureWired && gyroHandle?.active) field.camera.quaternion.copy(gyroHandle.q);
+      forceHud();
+    }
   });
-  $('sound').addEventListener('click', () => { /* v2 volgendeフェーズで実装 */ });
-  $('dex').addEventListener('click', () => { /* v2図鑑フェーズで実装 */ });
 }
 
-function unlock(): void {
-  const AC = window.AudioContext;
-  if (AC) void new AC().resume(); // BGM/効果音は後続フェーズ
+let gyroHandle: ReturnType<typeof startGyro> | null = null;
+let stream: MediaStream | null = null;
+
+async function startGame(): Promise<void> {
+  unlockAudio();
+  const ok = await requestGyroPermission(); // タップ直後にジャイロ許可
+  gyroHandle = startGyro();
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } }, audio: false });
+    const video = document.createElement('video');
+    video.autoplay = true; video.muted = true; video.playsInline = true;
+    video.srcObject = stream;
+    await video.play().catch(() => { /* 自動再生は次フレーム以降でOK */ });
+    video.style.cssText = 'position:fixed;inset:0;width:2px;height:2px;opacity:0;pointer-events:none';
+    document.body.appendChild(video);
+    field.setVideoBackground(video);
+  } catch (e) {
+    console.warn('[oheya2] カメラ失敗（映像なしで実行）', e);
+  }
+  if (ok && gyroHandle) { /* 連動OK */ }
+  $('title').classList.add('hidden');
+  $('dex').classList.add('hidden');
+  $('settings').classList.add('hidden');
+  hud.classList.remove('hidden');
+  forceHud();
+  startBGM();
+  showStatus('まわりを映して モンスターをさがそう');
+  cooldown = 1.5;
+  if (!gestureWired) {
+    gestureWired = true;
+    wireThrow();
+  }
+}
+
+function exitGame(): void {
+  sfx('tap');
+  $('title').classList.remove('hidden');
+  hud.classList.add('hidden');
+  stopBGM();
+  stream?.getTracks().forEach((t) => t.stop());
+  stream = null;
+  for (const m of [...monsters]) removeMonster(m);
+}
+
+/** フリック投げ(P3で拡張。現時点は簡易: 前方面のモンスターに一番近いものへ) */
+function wireThrow(): void {
+  const el = field.renderer.domElement;
+  el.style.touchAction = 'none';
+  el.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+  let sx = 0; let sy = 0; let down = false;
+  el.addEventListener('pointerdown', (e) => { sx = e.clientX; sy = e.clientY; down = true; });
+  el.addEventListener('pointerup', (e) => {
+    if (!down) return;
+    down = false;
+    const dx = e.clientX - sx; const dy = e.clientY - sy;
+    if (Math.hypot(dx, dy) < 12 || dy > 0) return; // タップ/下方向は投げない
+    // 一番近いターゲットへベジエでボールを飛ばす
+    let best: Monster | null = null; let bd = 300;
+    const rect = el.getBoundingClientRect();
+    for (const m of monsters) {
+      if (m.state !== 'idle') continue;
+      const v = new THREE.Vector3();
+      m.root.getWorldPosition(v);
+      v.project(field.camera);
+      const px = ((v.x + 1) / 2) * rect.width;
+      const py = ((1 - v.y) / 2) * rect.height;
+      const d = Math.hypot(px - e.clientX, py - e.clientY);
+      if (d < bd) { bd = d; best = m; }
+    }
+    if (best) {
+      const from = field.camera.position.clone().add(new THREE.Vector3(0, -0.4, -0.5));
+      const to = best.root.position.clone(); to.y += best.ref.scale;
+      const mid = from.clone().lerp(to, 0.5); mid.y += 1.0;
+      const ball = new THREE.Mesh(
+        new THREE.SphereGeometry(0.09, 18, 14),
+        new THREE.MeshStandardMaterial({ color: 0xff6688, roughness: 0.4 }));
+      ball.position.copy(from);
+      field.scene.add(ball);
+      sfx('throw');
+      const t0 = performance.now();
+      const fly = (): void => {
+        const k = Math.min(1, (performance.now() - t0) / 550);
+        const a = from.clone().lerp(mid, k);
+        const b = mid.clone().lerp(to, k);
+        ball.position.copy(a.lerp(b, k));
+        if (k < 1) requestAnimationFrame(fly);
+        else {
+          field.scene.remove(ball);
+          const ringR = best.ring.scale.x / best.ref.scale;
+          const quality = ringR <= 0.7 ? (ringR <= 0.45 ? 'EXCELLENT' : 'GREAT') : ringR <= 1.0 ? 'NICE' : 'OK';
+          const mult = quality === 'EXCELLENT' ? 1.8 : quality === 'GREAT' ? 1.5 : quality === 'NICE' ? 1.25 : 1;
+          const base = (best.ref.rarity === 'secret' ? 0.25 : best.ref.rarity === 'rare' ? 0.4 : [0, 0.68, 0.55, 0.45][best.ref.tier] ?? 0.5);
+          onThrowResult(best, Math.random() < Math.min(0.95, base * mult));
+        }
+      };
+      void fly();
+    }
+  });
 }
 
 void boot();

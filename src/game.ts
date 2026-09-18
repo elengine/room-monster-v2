@@ -11,6 +11,7 @@ export class GameField {
   camera = new THREE.PerspectiveCamera(70, 1, 0.05, 40);
   renderer: THREE.WebGLRenderer;
   world: RAPIER.World | null = null;
+  grid: THREE.GridHelper;
   private ghosts: THREE.Group;
 
   constructor(container: HTMLElement) {
@@ -34,10 +35,12 @@ export class GameField {
     // 物理世界
     this.world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 
-    // 地面の物理床
-    const floorBody = RAPIER.RigidBodyDesc.fixed();
-    const floor = this.world.createRigidBody(floorBody);
-    this.world.createCollider(RAPIER.ColliderDesc.cuboid(30, 0.05, 30).setTranslation(0, -0.05, 0), floor);
+    // 地面の物理床 + 仮想マス目(表示ON/OFF設定可)
+    this.grid = new THREE.GridHelper(8, 16, 0x7cf0ff, 0x4f8bff);
+    (this.grid.material as THREE.Material).transparent = true;
+    (this.grid.material as THREE.Material).opacity = 0.5;
+    this.grid.position.y = 0.02;
+    this.scene.add(this.grid);
 
     this.ghosts = new THREE.Group();
     this.scene.add(this.ghosts);
@@ -56,6 +59,11 @@ export class GameField {
     tex.colorSpace = THREE.SRGBColorSpace;
     this.scene.background = tex;
     video.style.display = 'none'; // DOM重ね置きをやめる
+  }
+
+  /** 床マス目の表示切替 */
+  setGridVisible(v: boolean): void {
+    this.grid.visible = v;
   }
 
   render(dt: number): void {
