@@ -284,6 +284,24 @@ async function boot(): Promise<void> {
   addEventListener('orientationchange', () => setTimeout(() => field.onResize(), 250));
   wireSettings();
   refreshCatch();
+  // 実機デバッグHUD( 見つからない問題の調査専用 ): 画面左上に3秒間の実測値を表示
+  // dockの使い方: モンスターが「見えない」状態を確認した直後に 画面をタップ4連打 で出す
+  const dbg = document.createElement('div');
+  dbg.style.cssText = 'position:fixed;left:8px;top:calc(env(safe-area-inset-top) + 72px);z-index:110;z-index:110;background:rgba(0,0,0,.85);color:#7cf0ff;font:11px/1.5 monospace;padding:10px;border-radius:10px;max-width:92vw;white-space:pre-wrap;display:none;pointer-events:none;';
+  document.body.appendChild(dbg);
+  let taps = 0; let lastTap = 0;
+  window.addEventListener('pointerdown', () => {
+    const now = performance.now();
+    taps = now - lastTap < 700 ? taps + 1 : 1;
+    lastTap = now;
+    if (taps === 4) {
+      taps = 0;
+      const dump = (window as unknown as { __qaDump?: () => string }).__qaDump;
+      dbg.textContent = dump ? dump() : 'NO_QA_DUMP';
+      dbg.style.display = 'block';
+      setTimeout(() => { dbg.style.display = 'none'; }, 8000);
+    }
+  }, { passive: true });
 
   // モデル読込: 戻り値نامجroーバルlibへ( 戻り値を捨てるとリングだけになる )
   void loadAllModels((d, n) => {
@@ -439,6 +457,8 @@ function wireThrow(): void {
     readyBall.style.left = '50%';
     readyBall.style.bottom = 'calc(env(safe-area-inset-bottom) + 84px)';
     readyBall.style.transform = 'translateX(-50%)';
+    readyBall.style.zIndex = '45';
+    readyBall.style.transition = '';
   };
   const onDown = (e: PointerEvent): void => {
     if (!hud.classList.contains('hidden')) { drag = { x: e.clientX, y: e.clientY }; }
@@ -493,13 +513,16 @@ function wireThrow(): void {
         readyBall.style.transform = 'none';
         if (k < 1) { requestAnimationFrame(fly); }
         else {
-          readyBall.style.zIndex = '';
           const ringR = best.ring.scale.x / best.ref.scale;
           const quality = ringR <= 0.7 ? (ringR <= 0.45 ? 'EXCELLENT' : 'GREAT') : ringR <= 1.0 ? 'NICE' : 'OK';
           const mult = quality === 'EXCELLENT' ? 1.8 : quality === 'GREAT' ? 1.5 : quality === 'NICE' ? 1.25 : 1;
           const base = (best.ref.rarity === 'secret' ? 0.25 : best.ref.rarity === 'rare' ? 0.4 : [0, 0.68, 0.55, 0.45][best.ref.tier] ?? 0.5);
           onThrowResult(best, Math.random() < Math.min(0.95, base * mult));
+          // 投げたら必ず【displayをお忘れなく復帰】して初期位置へ戻す
+          // ( readyBallViewport が毎フレーム display を上書きする前に明示的に''へ )
+          readyBall.style.display = '';
           resetBall();
+          readyBallViewport();
         }
       };
       void fly();
