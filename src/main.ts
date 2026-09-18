@@ -6,7 +6,8 @@ import { SPECIES, rollSpecies, type Species } from './species';
 import { loadAllModels, instantiate } from './rig';
 import { recordCatch, recordFlee, loadDex, totalCaught, clearDex } from './dex';
 import { startGyro, requestGyroPermission, setHorizon, setPan, getHorizon, getPan } from './gyro';
-import { sfx, startBGM, stopBGM, unlockAudio, setSfxMuted, setBgmMuted, setSfxVol, setBgmVol } from './audio';
+import { installFieldObserver } from './qahook';
+import { sfx, startBGM, stopBGM, unlockAudio, restoreAudioSettings, setSfxMuted, setBgmMuted, setSfxVol, setBgmVol } from './audio';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 declare global { interface Window { __soundMuted?: boolean } }
@@ -291,21 +292,33 @@ async function boot(): Promise<void> {
     for (const [k, v] of m) lib.set(k, v);
     (window as unknown as { __modelLib?: unknown }).__modelLib = lib; // QA用
   });
+  // QA/調査用: scene と monsters を公開( 本番軽量で無害 )
+  (window as unknown as { __qaScene?: unknown }).__qaScene = () => field.scene;
+  (window as unknown as { __qaMonsters?: unknown }).__qaMonsters = () => monsters;
+  (window as unknown as { __qaCam?: unknown }).__qaCam = () => field.camera;
+  // 実機診断: window.__qaDump() を実機 console から呼べば現状を一発で確認できる
+  installFieldObserver(field.scene, field.camera, () => monsters);
 
   $('start').addEventListener('click', () => { void startGame(); });
   $('exit').addEventListener('click', exitGame);
   $('sound').addEventListener('click', () => {
-    // 全消音トグル: OFF時はBGM+効果音両方消す。復帰時は設定画面の値に戻す
+    // 全消音トグル: OFF時はBGM+効果音両方消す。ON復帰は【トグル前の値を再現】
+    // ( localStorageは使わない: setXxxMuted(true) が自分で '1' を書き、
+    //   復帰時にそれを読んで再消音していたため )
     unlockAudio();
-    if (!window.__soundMuted) {
-      window.__soundMuted = true;
+    const w = window as unknown as { __soundMuted?: boolean; __soundPrev?: { sfx: boolean; bgm: boolean } };
+    if (!w.__soundMuted) {
+      w.__soundMuted = true;
+      w.__soundPrev = { sfx: localStorage.getItem('oheya2:sfxMuted') === '1', bgm: localStorage.getItem('oheya2:bgmMuted') === '1' };
       setSfxMuted(true); setBgmMuted(true);
       $('sound').textContent = '✕';
       showStatus('おと をけしました');
     } else {
-      window.__soundMuted = false;
-      setSfxMuted(localStorage.getItem('oheya2:sfxMuted') === '1');
-      setBgmMuted(localStorage.getItem('oheya2:bgmMuted') === '1');
+      w.__soundMuted = false;
+      setSfxMuted(w.__soundPrev?.sfx ?? false);
+      setBgmMuted(w.__soundPrev?.bgm ?? false);
+      // ゲインを確実に戻してからBGM開始( stopBGM の ramp 0 残留対策 )
+      restoreAudioSettings();
       startBGM();
       $('sound').textContent = '♪';
       showStatus('おと を戻しました');

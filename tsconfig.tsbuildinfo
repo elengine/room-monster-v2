@@ -1,1 +1,1 @@
-{"root":["./src/audio.ts","./src/dex.ts","./src/env.d.ts","./src/game.ts","./src/gyro.ts","./src/main.ts","./src/rig.ts","./src/species.ts"],"version":"5.9.3"}
+{"root":["./src/audio.ts","./src/dex.ts","./src/env.d.ts","./src/game.ts","./src/gyro.ts","./src/main.ts","./src/qahook.ts","./src/rig.ts","./src/species.ts"],"version":"5.9.3"}

@@ -37,7 +37,20 @@ export function unlockAudio(): void {
 
 function syncGain(): void {
   if (sfxGain && ctx) sfxGain.gain.setTargetAtTime(sfxMuted ? 0 : sfxVol, ctx.currentTime, 0.02);
-  if (bgmGain && ctx) bgmGain.gain.setTargetAtTime(bgmMuted ? 0 : bgmVol * 0.4, ctx.currentTime, 0.02);
+  if (bgmGain && ctx) {
+    // stopBGM の「ramp to 0.0001」が残っている場合は先に打ち消してから戻す
+    bgmGain.gain.cancelScheduledValues(ctx.currentTime);
+    bgmGain.gain.setTargetAtTime(bgmMuted ? 0 : bgmVol * 0.4, ctx.currentTime, 0.02);
+  }
+}
+
+/** 永続設定(localStorage)からゲインを復元( ♪トグル復帰・BGM再開の共通経路 ) */
+export function restoreAudioSettings(): void {
+  sfxMuted = localStorage.getItem('oheya2:sfxMuted') === '1';
+  bgmMuted = localStorage.getItem('oheya2:bgmMuted') === '1';
+  sfxVol = readVol('oheya2:sfxVol', 90) / 100;
+  bgmVol = readVol('oheya2:bgmVol', 60) / 100;
+  syncGain();
 }
 
 export function setSfxMuted(m: boolean): void { sfxMuted = m; localStorage.setItem('oheya2:sfxMuted', m ? '1' : '0'); syncGain(); }
@@ -106,8 +119,9 @@ export function sfx(name: Sfx): void {
 
 /** 明るくテンポのよいBGM: コード進行+シンコペーションのベース+メロディ */
 export function startBGM(): void {
-  if (!ctx || bgmTimer) return;
-  unlockAudio();
+  unlockAudio(); // ctx未生成→生成Sync。stopBGM が落としたゲインは restoreAudioSettings で復元
+  if (bgmTimer || !ctx) return;
+  restoreAudioSettings(); // 「いつの間にか鳴らない」対策: 開始時に必ず設定値へ戻す
   // 進行: I–vi–IV–V (C–Am–F–G) を 2拍単位。BPM120
   const beat = 0.5;
   const chords = [
