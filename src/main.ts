@@ -94,8 +94,9 @@ function spawn(species: Species): void {
   if (monsters.length >= maxN) return;
   if (!lib.has(species.model)) return;
   const depthFar = parseFloat(localStorage.getItem('oheya2:depth') || '3');
-  const x = (Math.random() - 0.5) * 2.4;
-  const z = Math.random() * (depthFar + 0.6) - depthFar;
+  // 見つけやすさ改善: 左右 x=±1.2 フル( 視野の中央60%)・奥行 z=0.2〜depthFar+0.4 に分散
+  const x = (Math.random() - 0.5) * 2.4 * 0.6;
+  const z = 0.2 + Math.random() * (depthFar + 0.2);
   const root = instantiate(lib, species.model, species.scale);
   root.position.set(x, 0, z);
   // 床影
@@ -318,8 +319,9 @@ async function boot(): Promise<void> {
       cooldown -= dt;
       if (cooldown <= 0) {
         spawn(rollSpecies(Math.random()));
-        const freq = parseFloat(localStorage.getItem('oheya2:freq') || '4'); // 出現間隔の基準秒( 調整可 )
-        cooldown = Math.max(1, freq) + Math.random() * 4;
+        // 出現間隔: 設定値を基準に±60%のバラツキ( ゲーム性でリズムを崩す )
+        const freq = Math.max(1, parseFloat(localStorage.getItem('oheya2:freq') || '4'));
+        cooldown = freq * (0.4 + Math.random() * 1.2);
       }
       const keep: Monster[] = [];
       for (const m of monsters) { updateMonster(m, t, dt); if (monsters.includes(m)) keep.push(m); }
@@ -440,20 +442,30 @@ function wireThrow(): void {
     }
     if (best) {
       sfx('throw');
-      const x0 = start.x; const y0 = window.innerHeight - start.y; // bottom 座標系
-      const x1 = e.clientX; const y1 = window.innerHeight - e.clientY;
-      // 弧を描く: 中間点を上方へ
-      const xM = (x0 + x1) / 2; const yM = Math.max(y0, y1) + 180;
+      // 発射位置=【ドラッグ中のボールの現在位置】( ドラッグエレメントをそのまま利用 )
+      const br = readyBall.getBoundingClientRect();
+      // 目標位置= モンスターの画面上の投影位置
+      const v = new THREE.Vector3();
+      best.root.getWorldPosition(v);
+      v.project(field.camera);
+      const x1 = ((v.x + 1) / 2) * rect.width;
+      const y1 = window.innerHeight - ((1 - v.y) / 2) * rect.height; // bottom 座標系
+      const x0 = br.left; const y0 = window.innerHeight - br.top - br.height; // bottom 座標系
+      // 効率のよい直線+弧: 中間はそのまま
       const t0 = performance.now();
+      readyBall.style.zIndex = '60'; // 飛行中はHUDより前面
+      readyBall.style.transition = 'opacity 0.1s';
       const fly = (): void => {
         const k = Math.min(1, (performance.now() - t0) / 500);
-        const ax = x0 + (xM - x0) * k, ay = y0 + (yM - y0) * k;
-        const bx = xM + (x1 - xM) * k, by = yM + (y1 - yM) * k;
-        readyBall.style.left = `${ax + (bx - ax) * k - 34}px`;
-        readyBall.style.bottom = `${ay + (by - ay) * k - 34}px`;
+        // 直線ベース+正弦で弧を描く( 中間点より上を漂う )
+        const x = x0 + (x1 - x0) * k;
+        const y = y0 + (y1 - y0) * k + Math.sin(k * Math.PI) * 140;
+        readyBall.style.left = `${x - 34}px`;
+        readyBall.style.bottom = `${y - 34}px`;
         readyBall.style.transform = 'none';
         if (k < 1) { requestAnimationFrame(fly); }
         else {
+          readyBall.style.zIndex = '';
           const ringR = best.ring.scale.x / best.ref.scale;
           const quality = ringR <= 0.7 ? (ringR <= 0.45 ? 'EXCELLENT' : 'GREAT') : ringR <= 1.0 ? 'NICE' : 'OK';
           const mult = quality === 'EXCELLENT' ? 1.8 : quality === 'GREAT' ? 1.5 : quality === 'NICE' ? 1.25 : 1;

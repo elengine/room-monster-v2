@@ -202,4 +202,11 @@ export function startBGM(): void {
 
 export function stopBGM(): void {
   if (bgmTimer) { clearInterval(bgmTimer); bgmTimer = null; }
+  // 鳴りかけの音も即停止( ゲインを即ゼロ。復帰時 syncGain が戻す )
+  const t = ctx ? ctx.currentTime : 0;
+  if (ctx && bgmGain) {
+    bgmGain.gain.cancelScheduledValues(t);
+    bgmGain.gain.setValueAtTime(bgmGain.gain.value, t);
+    bgmGain.gain.linearRampToValueAtTime(0.0001, t + 0.08);
+  }
 }
