@@ -63,6 +63,8 @@
     .panel .rowline .num { opacity: .85; }
     .panel .rowline.hide { opacity: .45; }
     .hidden { display: none !important; }
+    /* 図鑑・設定を開いたら HUD( z50 )より高い veils(z 100) で覆って隠す */
+    #settings, #dex { z-index: 100; }
     @media (max-width: 600px) { .status { font-size: 21px; } .chip { font-size: 18px; padding: 8px 14px; } }
   </style>
 </head>
@@ -86,7 +88,7 @@
       <div class="set-row"><span>地平線（縦）</span><b id="horizon-val">25°</b></div>
       <input type="range" id="horizon" min="0" max="50" step="1" value="25" />
       <div class="set-row"><span>左右パンニング</span><b id="pan-val">0°</b></div>
-      <input type="range" id="pan" min="-40" max="40" step="1" value="0" />
+      <input type="range" id="pan" min="-180" max="180" step="1" value="0" />
       <div class="set-row"><span>出現の奥行き</span><b id="depth-val">3</b></div>
       <input type="range" id="depth" min="1" max="6" step="1" value="3" />
       <div class="set-row"><span>飛ぶ高さ</span><b id="flyh-val">3</b></div>
@@ -119,7 +121,7 @@
       <button id="sound" class="icon-btn">♪</button>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <button id="dexbtn" class="icon-btn">図</button>
+      <button id="dexbtn" class="icon-btn">📖</button>
       <button id="exit" class="icon-btn">✕</button>
     </div>
   </div>

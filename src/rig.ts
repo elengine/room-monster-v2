@@ -7,14 +7,18 @@ import { SPECIES } from './species';
 
 const loader = new GLTFLoader();
 
-/** 全モデルを先読み → species.id → scene の辞書 */
+/** 全モデルを先読み → species.id → scene の辞書（1体失敗でも他は読む） */
 export async function loadAllModels(onProgress?: (done: number, total: number) => void): Promise<Map<string, THREE.Group>> {
   const map = new Map<string, THREE.Group>();
   const uniq = [...new Set(SPECIES.map((s) => s.model))];
   let done = 0;
   await Promise.all(uniq.map(async (file) => {
-    const gltf = await new Promise<any>((ok, ng) => loader.load(`./models/${file}`, ok, undefined, ng));
-    map.set(file, gltf.scene as THREE.Group);
+    try {
+      const gltf = await new Promise<any>((ok, ng) => loader.load(`./models/${file}`, ok, undefined, ng));
+      map.set(file, gltf.scene as THREE.Group);
+    } catch (e) {
+      console.warn('[oheya2] モデル読込失敗:', file, e);
+    }
     done++;
     onProgress?.(done, uniq.length);
   }));

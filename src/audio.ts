@@ -95,18 +95,52 @@ export function sfx(name: Sfx): void {
   }
 }
 
-/** 静かなアンビエントBGM */
+/** 明るくテンポのよいBGM: コード進行+シンコペーションのベース+メロディ */
 export function startBGM(): void {
   if (!ctx || bgmTimer) return;
   unlockAudio();
-  const base = [220, 277.18, 329.63, 369.99];
-  let i = 0;
-  const step = (): void => {
-    toneTo(bgmGain, base[i % base.length] ?? 220, 1.9, { type: 'sine', vol: 0.07, glide: base[(i + 1) % base.length] ?? 220 });
-    i++;
+  // 進行: I–vi–IV–V (C–Am–F–G) を 2拍単位。BPM120
+  const beat = 0.5;
+  const chords = [
+    [261.63, 329.63, 392.0],   // C
+    [220.0, 261.63, 329.63],   // Am
+    [174.61, 220.0, 261.63],   // F
+    [196.0, 246.94, 293.66],   // G
+  ];
+  // ベース(8分音符のパターン): ルート-ルート-5度-5度-ルート-オクターブ-5度-7度
+  const bassPattern = [1, 1, 1.5, 1.5, 1, 2, 1.5, 1.25];
+  let bar = 0;
+  const playBar = (): void => {
+    if (!ctx) return;
+    const t0 = ctx.currentTime + 0.05;
+    const ch = (chords[bar % chords.length] ?? chords[0]) as number[];
+    const root = ch[0] ?? 261.63;
+    // ベース+メロディ
+    for (let i = 0; i < 8; i++) {
+      const f = root * (bassPattern[i] ?? 1);
+      const osc = ctx.createOscillator(); const g = ctx.createGain();
+      osc.type = 'square'; osc.frequency.setValueAtTime(f / 2, t0 + i * beat / 2);
+      g.gain.setValueAtTime(0, t0 + i * beat / 2);
+      g.gain.linearRampToValueAtTime(0.05, t0 + i * beat / 2 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * beat / 2 + beat / 2 - 0.02);
+      osc.connect(g); g.connect(bgmGain ?? master ?? ctx.destination); // BGM専用ゲイン( 音量・トグル統合 )
+      osc.start(t0 + i * beat / 2); osc.stop(t0 + i * beat / 2 + beat / 2);
+    }
+    // メロディ(明るいアルペジオ上昇+上_down)
+    const melody = [ch[1] ?? root, ch[2] ?? root, (ch[2] ?? root) * 1.5, ch[1] ?? root];
+    for (let i = 0; i < 4; i++) {
+      const osc = ctx.createOscillator(); const g = ctx.createGain();
+      osc.type = 'triangle'; osc.frequency.setValueAtTime(melody[i] ?? root, t0 + i * beat);
+      g.gain.setValueAtTime(0, t0 + i * beat);
+      g.gain.linearRampToValueAtTime(0.06, t0 + i * beat + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * beat + beat - 0.03);
+      osc.connect(g); g.connect(bgmGain ?? master ?? ctx.destination);
+      osc.start(t0 + i * beat); osc.stop(t0 + i * beat + beat);
+    }
+    bar++;
   };
-  step();
-  bgmTimer = window.setInterval(step, 1900);
+  playBar();
+  bgmTimer = window.setInterval(playBar, beat * 8 * 1000);
 }
 
 export function stopBGM(): void {

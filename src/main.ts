@@ -9,6 +9,7 @@ import { startGyro, requestGyroPermission, setHorizon, setPan, getHorizon, getPa
 import { sfx, startBGM, stopBGM, unlockAudio, setSfxMuted, setBgmMuted, setSfxVol, setBgmVol } from './audio';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+declare global { interface Window { __soundMuted?: boolean } }
 const DEG = THREE.MathUtils.degToRad;
 
 type Monster = {
@@ -44,6 +45,14 @@ function refreshCatch(): void {
   $('catch').textContent = `つかまえた: ${totalCaught()}`;
 }
 
+/** メッセージを即消す( 画面遷移時はタイマー 待たずに消す ) */
+function hideStatus(): void {
+  if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+  const el = $('status');
+  el.classList.remove('show', 'bad');
+  el.textContent = '';
+}
+
 /** HUDを毎フレーム強制表示( どの端末でも常に見える・押せる ) */
 function forceHud(): void {
   if (!hud.classList.contains('hidden')) {
@@ -76,9 +85,9 @@ function spawn(species: Species): void {
     new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
   sh.rotation.x = -Math.PI / 2; sh.position.y = 0.004;
   root.add(sh);
-  // 正面の当たり判定リング
+  // 正面の当たり判定リング(線を細く)
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.62, 1.0, 40),
+    new THREE.RingGeometry(0.94, 1.0, 48),
     new THREE.MeshBasicMaterial({ color: 0x3eff6a, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
   ring.position.set(0, species.scale * 0.75, species.scale * 0.42);
   ring.scale.setScalar(species.scale * 0.6);
@@ -168,8 +177,8 @@ function wireSettings(): void {
   bgmt.checked = localStorage.getItem('oheya2:bgmMuted') !== '1';
   bgmt.addEventListener('change', () => { setBgmMuted(!bgmt.checked); if (!bgmt.checked) startBGM(); }, );
 
-  $('settings-btn').addEventListener('click', () => { unlockAudio(); sfx('tap'); settings.classList.remove('hidden'); });
-  $('settings-done').addEventListener('click', () => { sfx('tap'); settings.classList.add('hidden'); });
+  $('settings-btn').addEventListener('click', () => { unlockAudio(); sfx('tap'); hideStatus(); settings.classList.remove('hidden'); });
+  $('settings-done').addEventListener('click', () => { sfx('tap'); hideStatus(); settings.classList.add('hidden'); });
 }
 
 // ===================== 図鑑 =====================
@@ -215,13 +224,35 @@ async function boot(): Promise<void> {
   wireSettings();
   refreshCatch();
 
-  loadAllModels((d, n) => { if (d === n) showStatus('じゅんび かんりょう！'); });
+  // モデル読込: 戻り値نامجroーバルlibへ( 戻り値を捨てるとリングだけになる )
+  void loadAllModels((d, n) => {
+    if (d === n) showStatus('じゅんび かんりょう！');
+  }).then((m) => {
+    for (const [k, v] of m) lib.set(k, v);
+    (window as unknown as { __modelLib?: unknown }).__modelLib = lib; // QA用
+  });
 
   $('start').addEventListener('click', () => { void startGame(); });
   $('exit').addEventListener('click', exitGame);
-  $('sound').addEventListener('click', () => { showStatus('音切り替えは設定画面から'); sfx('tap'); });
-  $('dexbtn').addEventListener('click', () => { sfx('dex'); renderDex(); $('dex').classList.remove('hidden'); });
-  $('dex-close').addEventListener('click', () => { sfx('tap'); $('dex').classList.add('hidden'); });
+  $('sound').addEventListener('click', () => {
+    // 全消音トグル: OFF時はBGM+効果音両方消す。復帰時は設定画面の値に戻す
+    unlockAudio();
+    if (!window.__soundMuted) {
+      window.__soundMuted = true;
+      setSfxMuted(true); setBgmMuted(true);
+      $('sound').textContent = '✕';
+      showStatus('おと をけしました');
+    } else {
+      window.__soundMuted = false;
+      setSfxMuted(localStorage.getItem('oheya2:sfxMuted') === '1');
+      setBgmMuted(localStorage.getItem('oheya2:bgmMuted') === '1');
+      startBGM();
+      $('sound').textContent = '♪';
+      showStatus('おと を戻しました');
+    }
+  });
+  $('dexbtn').addEventListener('click', () => { sfx('dex'); hideStatus(); renderDex(); $('dex').classList.remove('hidden'); });
+  $('dex-close').addEventListener('click', () => { sfx('tap'); hideStatus(); $('dex').classList.add('hidden'); });
 
   let prev = -1;
   field.renderer.setAnimationLoop((now) => {
@@ -267,6 +298,7 @@ async function startGame(): Promise<void> {
   $('title').classList.add('hidden');
   $('dex').classList.add('hidden');
   $('settings').classList.add('hidden');
+  hideStatus(); // 遷移直前のメッセージを消す
   hud.classList.remove('hidden');
   forceHud();
   startBGM();
@@ -280,6 +312,7 @@ async function startGame(): Promise<void> {
 
 function exitGame(): void {
   sfx('tap');
+  hideStatus(); // タイトルへ戻るのでメッセージも消す
   $('title').classList.remove('hidden');
   hud.classList.add('hidden');
   stopBGM();
@@ -288,18 +321,26 @@ function exitGame(): void {
   for (const m of [...monsters]) removeMonster(m);
 }
 
-/** フリック投げ(P3で拡張。現時点は簡易: 前方面のモンスターに一番近いものへ) */
+/** フリック投げ: 常駐ボール(DOM)をフリックで投げ、近いモンスターへ飛ばす */
 function wireThrow(): void {
   const el = field.renderer.domElement;
   el.style.touchAction = 'none';
   el.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+  // 常駐ボール( つまめる構えボール ): 画面下中央。DOMで常時表示( HUDと同じ強制表示方式 )
+  const readyBall = document.createElement('div');
+  readyBall.style.cssText = 'position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 84px);transform:translateX(-50%);width:64px;height:64px;border-radius:50%;z-index:45;pointer-events:none;' +
+    'background:radial-gradient(circle at 35% 28%, #ffb0bc 0%, #ff4d6d 45%, #8f1230 100%);border:3px solid #fff;box-shadow:0 4px 16px rgba(0,0,0,.5), inset 0 -6px 10px rgba(0,0,0,.35);';
+  document.body.appendChild(readyBall);
+
   let sx = 0; let sy = 0; let down = false;
   el.addEventListener('pointerdown', (e) => { sx = e.clientX; sy = e.clientY; down = true; });
   el.addEventListener('pointerup', (e) => {
     if (!down) return;
     down = false;
     const dx = e.clientX - sx; const dy = e.clientY - sy;
+    readyBall.style.display = '';
     if (Math.hypot(dx, dy) < 12 || dy > 0) return; // タップ/下方向は投げない
+    readyBall.style.display = 'none'; // 投げたら構えボールを消す
     // 一番近いターゲットへベジエでボールを飛ばす
     let best: Monster | null = null; let bd = 300;
     const rect = el.getBoundingClientRect();
