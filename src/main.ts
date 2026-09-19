@@ -303,7 +303,18 @@ async function boot(): Promise<void> {
     }
   }, { passive: true });
 
-  // モデル読込: 戻り値نامجroーバルlibへ( 戻り値を捨てるとリングだけになる )
+  // ジャイロ生値のライブ表示( 実機での軸割り当て検証用 ): ゲーム中に左上へ表示
+  const gyroDbg = document.createElement('div');
+  gyroDbg.style.cssText = 'position:fixed;left:8px;top:calc(env(safe-area-inset-top) + 6px);z-index:120;background:rgba(0,0,0,.75);color:#9df3ff;font:12px/1.6 monospace;padding:6px 9px;border-radius:8px;display:none;pointer-events:none;white-space:pre;';
+  document.body.appendChild(gyroDbg);
+  setInterval(() => {
+    if (!gyroHandle?.active || hud.classList.contains('hidden')) { return; }
+    const s = gyroHandle.snapshot();
+    gyroDbg.style.display = 'block';
+    gyroDbg.textContent = `α=${Math.round(s.alpha)} β=${Math.round(s.beta)} γ=${Math.round(s.gamma)} orient=${Math.round(s.orient)}`;
+  }, 200);
+
+  // モデル読込: 戻り値نامجروーバルlibへ( 戻り値を捨てるとリングだけになる )
   void loadAllModels((d, n) => {
     if (d === n) showStatus('じゅんび かんりょう！');
   }).then(async (m) => {
