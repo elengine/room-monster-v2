@@ -27,13 +27,6 @@ export type GyroHandle = {
 const Z = new THREE.Vector3(0, 0, 1);
 const deg = (v: number | null) => THREE.MathUtils.degToRad(v ?? 0);
 
-// iOS(iPhone/iPad)判定: iPad は UA 上 Mac になるため maxTouchPoints でも補足
-const isIOS = (() => {
-  const ua = navigator.userAgent;
-  return /iPad|iPhone|iPod/.test(ua) ||
-    (/Macintosh|MacIntel/.test(ua) && (((navigator as unknown as { maxTouchPoints?: number }).maxTouchPoints) ?? 0) > 1);
-})();
-
 // 設定オフセット(度) — 相対化後の微調整用
 let horizonOffset = 0; // チルト(±45)
 let panOffset = 0;      // 左右パンニング(±45)
@@ -41,6 +34,23 @@ export function setHorizon(d: number): void { horizonOffset = d; }
 export function getHorizon(): number { return horizonOffset; }
 export function setPan(d: number): void { panOffset = d; }
 export function getPan(): number { return panOffset; }
+
+// 固定の基準回転(端末姿勢→カメラ基準へ)
+const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+
+/**
+ * 純粋計算: α(方位)/β(前後)/γ(左右) と 画面角(orient, deg) から「端末姿勢→カメラ向き」Quaternion を返す。
+ * window/device に非依存で実機なしにテスト可能。
+ */
+export function computeQScreen(alphaDeg: number, betaDeg: number, gammaDeg: number, orientDeg: number): THREE.Quaternion {
+  const e = new THREE.Euler();
+  e.set(deg(betaDeg), deg(gammaDeg), -deg(alphaDeg), 'YXZ');
+  const q = new THREE.Quaternion().setFromEuler(e);
+  q.multiply(_q1);
+  q.multiply(new THREE.Quaternion().setFromAxisAngle(Z, -deg(orientDeg)));
+  return q;
+}
+
 
 /** 画面の回転角(度)。portrait=0 / landscape=90 … */
 function screenAngleDeg(): number {
@@ -64,8 +74,6 @@ export function startGyro(): GyroHandle {
   const handle: GyroHandle = { active: false, q: new THREE.Quaternion(), resetFront: () => {}, snapshot: () => ({ alpha: snap.alpha, beta: snap.beta, gamma: snap.gamma, orient: snap.orient }), stop: () => {} };
   if (!('DeviceOrientationEvent' in window)) return handle;
 
-  const euler = new THREE.Euler();
-  const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // 端末姿勢をカメラ基準へ
   const qScreen = new THREE.Quaternion(); // 画面向き込みの現姿勢
   const snap = { alpha: 0, beta: 0, gamma: 0, orient: screenAngleDeg() };
   const qPan = new THREE.Quaternion();
@@ -79,16 +87,7 @@ export function startGyro(): GyroHandle {
 
   const onRot = (e: DeviceOrientationEvent): void => {
     if (e.alpha == null || e.beta == null || e.gamma == null) return;
-    // iOS(iPhone/iPad)は β/γ が Android と入れ替わって報告される(実機計測で確認)ため、
-    // 同じ物理姿勢→同じクォータニオンへ正規化する。これで縦横・上下・機種差が一意に揃う。
-    const b = isIOS ? e.gamma : e.beta;
-    const g = isIOS ? e.beta : e.gamma;
-    // 標準合成: 端末の絶対姿勢(beta,gamma,-alpha,'YXZ') × 画面向き(screen角) により、
-    // ポートレート/ランドスケープ共通で「端末を動かす=カメラが同じ向きに動く」FPSになる
-    euler.set(deg(b), deg(g), -deg(e.alpha), 'YXZ');
-    qScreen.setFromEuler(euler);
-    qScreen.multiply(q1);
-    qScreen.multiply(new THREE.Quaternion().setFromAxisAngle(Z, -deg(screenAngleDeg())));
+    qScreen.copy(computeQScreen(e.alpha, e.beta, e.gamma, screenAngleDeg()));
     havePose = true;
     snap.alpha = e.alpha; snap.beta = e.beta; snap.gamma = e.gamma; snap.orient = screenAngleDeg();
     // 自動キャリブ/ダブルタップで要求された場合は【この新鮮な姿勢】で基準化(旧姿勢でやらない)
