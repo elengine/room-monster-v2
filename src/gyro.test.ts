@@ -80,16 +80,29 @@ describe('ジャイロFPS計算 computeQScreen', () => {
     }
   });
 
-  it('【正しいFPSの性質】β+30 は全orientでカメラのピッチ(上向き)に一貫して写り、γ は上下に干渉しない', () => {
-    // 純粋計算では「β増加=ピッチ上」が全orientで安定(実測: orient 0/90/180/270 全て fwd.y が+0.68)。
-    // ※実機では「天面を上げるセンサ軸が β/γ どちらか」が OS/向きで変わる(Fold8: orient0→β, iPad: orient0→γ)。
-    //   この「センサ軸→β相当」への正規化は実機フィードバックで決めるため、ここでは純粋関数の安定性を担保する。
+  it('【iPadの実機計測行4件】上を向くと(アップ軸→0) 全てのorientで fwdY が増える=上を向く', () => {
+    // kokuten実測: ipad で「上」は (o0:g 90→0, o90:b 90→180, o180:g -90→0, o270:b -90→-180)
+    const rows: Array<[number, 'b' | 'g', number, number]> = [
+      [0, 'g', 90, 0], [180, 'g', -90, 0], [90, 'b', 90, 180], [270, 'b', -90, -180],
+    ];
+    for (const [o, ax, f, t] of rows) {
+      const y0 = ax === 'g' ? axes(computeQScreen(0, 70, f, o, true)).fwd.y : axes(computeQScreen(0, f, 0, o, true)).fwd.y;
+      const y1 = ax === 'g' ? axes(computeQScreen(0, 70, t, o, true)).fwd.y : axes(computeQScreen(0, t, 0, o, true)).fwd.y;
+      expect(y1).toBeGreaterThan(y0); // 上で増える(上を向く)
+    }
+  });
+
+  it('【天地反転チェック(iPad)】「上を向く」連続掃引で up が急反転しない(→180/270の-90起点でも崩れない)', () => {
     for (const o of [0, 90, 180, 270]) {
-      const f0 = axes(computeQScreen(0, 70, 0, o)).fwd;
-      const fB = axes(computeQScreen(0, 100, 0, o)).fwd;
-      expect(fB.y).toBeGreaterThan(f0.y);            // β増 → 上を向く(ピッチ)
-      const fG = axes(computeQScreen(0, 70, 40, o)).fwd;
-      expect(fB.y - f0.y).toBeGreaterThan(fG.y - f0.y); // 上下応答はβが支配(γより大きい)
+      // レベル(90又は-90側)から上(0側/180側)へ連続掃引
+      const from = o % 180 === 0 ? (o === 0 ? 90 : -90) : (o === 90 ? 90 : -90);
+      const prev = { x: 0, z: 0 };
+      for (let k = 0; k <= 30; k++) {
+        const v = (o === 0 ? from - k * 3 : o === 180 ? from + k * 3 : o === 90 ? from + k * 3 : from - k * 3);
+        const u = new THREE.Vector3().copy(UP).applyQuaternion(computeQScreen(0, o === 90 ? v : 70, o === 90 ? 0 : v, o, true));
+        if (k > 0) expect(u.x * prev.x + u.z * prev.z).toBeGreaterThan(-0.5); // 水平向きが急反転しない
+        prev.x = u.x; prev.z = u.z;
+      }
     }
   });
 });
