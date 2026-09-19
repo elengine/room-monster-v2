@@ -284,35 +284,6 @@ async function boot(): Promise<void> {
   addEventListener('orientationchange', () => setTimeout(() => { field.onResize(); gyroHandle?.resetFront(); }, 250));
   wireSettings();
   refreshCatch();
-  // 実機デバッグHUD( 見つからない問題の調査専用 ): 画面左上に3秒間の実測値を表示
-  // dockの使い方: モンスターが「見えない」状態を確認した直後に 画面をタップ4連打 で出す
-  const dbg = document.createElement('div');
-  dbg.style.cssText = 'position:fixed;left:8px;top:calc(env(safe-area-inset-top) + 72px);z-index:110;z-index:110;background:rgba(0,0,0,.85);color:#7cf0ff;font:11px/1.5 monospace;padding:10px;border-radius:10px;max-width:92vw;white-space:pre-wrap;display:none;pointer-events:none;';
-  document.body.appendChild(dbg);
-  let taps = 0; let lastTap = 0;
-  window.addEventListener('pointerdown', () => {
-    const now = performance.now();
-    taps = now - lastTap < 700 ? taps + 1 : 1;
-    lastTap = now;
-    if (taps === 4) {
-      taps = 0;
-      const dump = (window as unknown as { __qaDump?: () => string }).__qaDump;
-      dbg.textContent = dump ? dump() : 'NO_QA_DUMP';
-      dbg.style.display = 'block';
-      setTimeout(() => { dbg.style.display = 'none'; }, 8000);
-    }
-  }, { passive: true });
-
-  // ジャイロ生値のライブ表示( 実機での軸割り当て検証用 ): ゲーム中に左上へ表示
-  const gyroDbg = document.createElement('div');
-  gyroDbg.style.cssText = 'position:fixed;left:8px;top:calc(env(safe-area-inset-top) + 6px);z-index:120;background:rgba(0,0,0,.75);color:#9df3ff;font:12px/1.6 monospace;padding:6px 9px;border-radius:8px;display:none;pointer-events:none;white-space:pre;';
-  document.body.appendChild(gyroDbg);
-  setInterval(() => {
-    if (!gyroHandle?.active || hud.classList.contains('hidden')) { return; }
-    const s = gyroHandle.snapshot();
-    gyroDbg.style.display = 'block';
-    gyroDbg.textContent = `α=${Math.round(s.alpha)} β=${Math.round(s.beta)} γ=${Math.round(s.gamma)} orient=${Math.round(s.orient)}`;
-  }, 200);
 
   // モデル読込: 戻り値نامجروーバルlibへ( 戻り値を捨てるとリングだけになる )
   void loadAllModels((d, n) => {

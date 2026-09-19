@@ -17,8 +17,6 @@ import * as THREE from 'three';
 export type GyroHandle = {
   active: boolean;
   q: THREE.Quaternion;
-  /** 生の姿勢値(α=方位/β=前後/γ=左右)と画面角(deg)を返す。実機での軸割り当て検証用 */
-  snapshot: () => { alpha: number; beta: number; gamma: number; orient: number };
   /** 現在(最新)の画面向き込み姿勢を「正面=0」として再基準化（＝正面リセット） */
   resetFront: () => void;
   stop: () => void;
@@ -83,11 +81,10 @@ export async function requestGyroPermission(): Promise<boolean> {
 }
 
 export function startGyro(): GyroHandle {
-  const handle: GyroHandle = { active: false, q: new THREE.Quaternion(), resetFront: () => {}, snapshot: () => ({ alpha: snap.alpha, beta: snap.beta, gamma: snap.gamma, orient: snap.orient }), stop: () => {} };
+  const handle: GyroHandle = { active: false, q: new THREE.Quaternion(), resetFront: () => {}, stop: () => {} };
   if (!('DeviceOrientationEvent' in window)) return handle;
 
   const qScreen = new THREE.Quaternion(); // 画面向き込みの現姿勢
-  const snap = { alpha: 0, beta: 0, gamma: 0, orient: screenAngleDeg() };
   const qPan = new THREE.Quaternion();
   const qTilt = new THREE.Quaternion();
   const base = new THREE.Quaternion();    // 基準=最新姿勢の逆(正面リセットで更新)
@@ -101,7 +98,6 @@ export function startGyro(): GyroHandle {
     if (e.alpha == null || e.beta == null || e.gamma == null) return;
     qScreen.copy(computeQScreen(e.alpha, e.beta, e.gamma, screenAngleDeg(), isIOS));
     havePose = true;
-    snap.alpha = e.alpha; snap.beta = e.beta; snap.gamma = e.gamma; snap.orient = screenAngleDeg();
     // 自動キャリブ/ダブルタップで要求された場合は【この新鮮な姿勢】で基準化(旧姿勢でやらない)
     if (pendingReset) {
       pendingReset = false;
