@@ -27,13 +27,6 @@ export type GyroHandle = {
 const Z = new THREE.Vector3(0, 0, 1);
 const deg = (v: number | null) => THREE.MathUtils.degToRad(v ?? 0);
 
-// iOS(iPhone/iPad)判定: iPad は UA 上 Mac になるため maxTouchPoints でも補足
-const isIOS = (() => {
-  const ua = navigator.userAgent;
-  return /iPad|iPhone|iPod/.test(ua) ||
-    (/Macintosh|MacIntel/.test(ua) && (((navigator as unknown as { maxTouchPoints?: number }).maxTouchPoints) ?? 0) > 1);
-})();
-
 // 設定オフセット(度) — 相対化後の微調整用
 let horizonOffset = 0; // チルト(±45)
 let panOffset = 0;      // 左右パンニング(±45)
@@ -48,23 +41,11 @@ const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
 /**
  * 純粋計算: α(方位)/β(前後)/γ(左右) と 画面角(orient, deg) から「端末姿勢→カメラ向き」Quaternion を返す。
  * window/device に非依存で実機なしにテスト可能。
- *
- * ・Android(既定): β増加→ピッチ(上向き) / γ→ロール系（現行3.4.1と同じ）
- * ・iOS/ipad: 実機計測から「上を向くと『アップ軸』が 90→0 へ向かう」方式で正規化。
- *   アップ軸 upA = orientに応じて ( 0:g, 90:180-b, 180:-g, 270:b+180 )、ピッチ = 90-upA とし、
- *   4向き(0/90/180/270)全てで「上→fwdY増加(上を向く)」をテストで担保(4/4)。
+ * (3.5.1: 3.5.0のiPad特化分岐を撤去し 3.4.1 相当へ復元。iOS/Androidそれぞれの正規化は調査→再設計)
  */
-export function computeQScreen(alphaDeg: number, betaDeg: number, gammaDeg: number, orientDeg: number, isIOS = false): THREE.Quaternion {
+export function computeQScreen(alphaDeg: number, betaDeg: number, gammaDeg: number, orientDeg: number): THREE.Quaternion {
   const e = new THREE.Euler();
-  if (isIOS) {
-    const m = ((orientDeg % 360) + 360) % 360;
-    const upA = m === 0 ? gammaDeg : m === 90 ? 180 - betaDeg : m === 180 ? -gammaDeg : betaDeg + 180;
-    const pitch = 90 - upA;                       // 上を向くと 0→+ (レベルで0)
-    const rollSrc = orientDeg % 180 === 0 ? betaDeg : gammaDeg;
-    e.set(deg(pitch), deg(rollSrc), -deg(alphaDeg), 'YXZ');
-  } else {
-    e.set(deg(betaDeg), deg(gammaDeg), -deg(alphaDeg), 'YXZ');
-  }
+  e.set(deg(betaDeg), deg(gammaDeg), -deg(alphaDeg), 'YXZ');
   const q = new THREE.Quaternion().setFromEuler(e);
   q.multiply(_q1);
   q.multiply(new THREE.Quaternion().setFromAxisAngle(Z, -deg(orientDeg)));
@@ -108,7 +89,7 @@ export function startGyro(): GyroHandle {
 
   const onRot = (e: DeviceOrientationEvent): void => {
     if (e.alpha == null || e.beta == null || e.gamma == null) return;
-    qScreen.copy(computeQScreen(e.alpha, e.beta, e.gamma, screenAngleDeg(), isIOS));
+    qScreen.copy(computeQScreen(e.alpha, e.beta, e.gamma, screenAngleDeg()));
     havePose = true;
     snap.alpha = e.alpha; snap.beta = e.beta; snap.gamma = e.gamma; snap.orient = screenAngleDeg();
     // 自動キャリブ/ダブルタップで要求された場合は【この新鮮な姿勢】で基準化(旧姿勢でやらない)
