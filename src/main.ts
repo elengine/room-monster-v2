@@ -281,7 +281,7 @@ async function boot(): Promise<void> {
   $('ver').textContent = `ver ${__APP_VERSION__}`;
   field.onResize();
   addEventListener('resize', () => field.onResize());
-  addEventListener('orientationchange', () => setTimeout(() => { field.onResize(); gyroHandle?.calibrate(); }, 250));
+  addEventListener('orientationchange', () => setTimeout(() => { field.onResize(); gyroHandle?.resetFront(); }, 250));
   wireSettings();
   refreshCatch();
   // 実機デバッグHUD( 見つからない問題の調査専用 ): 画面左上に3秒間の実測値を表示
@@ -408,7 +408,7 @@ async function startGame(): Promise<void> {
   unlockAudio();
   const ok = await requestGyroPermission(); // タップ直後にジャイロ許可
   gyroHandle = startGyro();
-  gyroHandle?.calibrate(); // スタートタップ時点の向きを「正面=0」に基準化
+  gyroHandle?.resetFront(); // スタートタップ時点の向きを「正面=0」に基準化
   wireDoubleTapReset();
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -459,7 +459,7 @@ function wireDoubleTapReset(): void {
     if (hud.classList.contains('hidden')) return;      // ゲーム中のみ
     const now = performance.now();
     if (now - last < 400) {
-      gyroHandle?.calibrate();
+      gyroHandle?.resetFront();
       sfx('tap');
       showStatus('いまの向きを まえ にセット！');
     }

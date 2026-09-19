@@ -7,13 +7,18 @@
 //   ③ calibrate() を スタートタップ時 / 向き切替検知時 / ダブルタップ で呼ぶ
 //   これで機種基準・縦横・構え方の差を自動吸収し、手動パンは微調整用のみ。
 
+// v3.3.1: 自動キャリブ(縦横切替)とダブルタップ正面リセットを同一処理 resetFront() に統一。
+//   リセットは「最新の画面向き込み姿勢」を基準=0として再基準化。チルト/パンは
+//   リセット**後**の補正値として( リセット基準に対して )作用する。
+//   向き切替時は deviceorientation の次の新鮮なデータで基準化し直す( 古い姿勢で基準化しない )。
+
 import * as THREE from 'three';
 
 export type GyroHandle = {
   active: boolean;
   q: THREE.Quaternion;
-  /** 現在の画面向き込み姿勢を「正面=0」として基準化 */
-  calibrate: () => void;
+  /** 現在(最新)の画面向き込み姿勢を「正面=0」として再基準化（＝正面リセット） */
+  resetFront: () => void;
   stop: () => void;
 };
 
@@ -47,7 +52,7 @@ export async function requestGyroPermission(): Promise<boolean> {
 }
 
 export function startGyro(): GyroHandle {
-  const handle: GyroHandle = { active: false, q: new THREE.Quaternion(), calibrate: () => {}, stop: () => {} };
+  const handle: GyroHandle = { active: false, q: new THREE.Quaternion(), resetFront: () => {}, stop: () => {} };
   if (!('DeviceOrientationEvent' in window)) return handle;
 
   const euler = new THREE.Euler();
@@ -56,10 +61,10 @@ export function startGyro(): GyroHandle {
   const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
   const qScreen = new THREE.Quaternion(); // 画面向き込みの現姿勢
   const qPan = new THREE.Quaternion();
-  const qHor = new THREE.Quaternion();
-  let base = new THREE.Quaternion();      // 基準=現在姿勢の逆
+  const qTilt = new THREE.Quaternion();
+  const base = new THREE.Quaternion();    // 基準=最新姿勢の逆(正面リセットで更新)
   let havePose = false;
-  let needCalib = true;                // 初回データ到着時に基準化
+  let pendingReset = true;              // 初回データ到着時に正面=その姿勢で基準化
 
   const frame = new THREE.Vector3(0, 1, 0);
   const side = new THREE.Vector3(1, 0, 0);
@@ -72,15 +77,20 @@ export function startGyro(): GyroHandle {
     // 画面回転(縦⇔横)を端末の画面法線まわりに足す → 端末を回しても「上」が崩れない
     qScreen.copy(qAbs).multiply(new THREE.Quaternion().setFromAxisAngle(Z, -deg(screenAngleDeg())));
     havePose = true;
+    // 自動キャリブ/ダブルタップで要求された場合は【この新鮮な姿勢】で基準化(旧姿勢でやらない)
+    if (pendingReset) {
+      pendingReset = false;
+      base.copy(qScreen).invert();
+    }
     qPan.setFromAxisAngle(frame, deg(panOffset));
-    qHor.setFromAxisAngle(side, deg(horizonOffset));
-    // 相対追従: 基準の逆 × 現姿勢 × 微調整
-    handle.q.copy(base).multiply(qScreen).multiply(qPan).multiply(qHor);
+    qTilt.setFromAxisAngle(side, deg(horizonOffset));
+    // 相対追従 + リセット後のチルト/パン補正
+    handle.q.copy(base).multiply(qScreen).multiply(qPan).multiply(qTilt);
     handle.active = true;
-    if (needCalib) { needCalib = false; handle.q.copy(qPan).multiply(qHor); }
   };
-  handle.calibrate = () => {
-    if (!havePose) { needCalib = true; return; } // まだ姿勢が無ければ初回で基準化
+  // 正面リセット: まだ姿勢が無ければ「次の新鮮なデータ」で、あれば即時・最新姿勢で再基準化
+  handle.resetFront = () => {
+    if (!havePose) { pendingReset = true; return; }
     base.copy(qScreen).invert();
   };
   window.addEventListener('deviceorientation', onRot);
