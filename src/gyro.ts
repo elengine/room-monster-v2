@@ -83,16 +83,15 @@ export function startGyro(): GyroHandle {
       base.copy(qScreen).invert();
     }
     qPan.setFromAxisAngle(frame, deg(panOffset));
-    qTilt.setFromAxisAngle(side, deg(horizonOffset));
+    qTilt.setFromAxisAngle(side, -deg(horizonOffset)); // チルト方向: +で下を向く(現行と反転)
     // 相対追従 + リセット後のチルト/パン補正
     handle.q.copy(base).multiply(qScreen).multiply(qPan).multiply(qTilt);
     handle.active = true;
   };
-  // 正面リセット: まだ姿勢が無ければ「次の新鮮なデータ」で、あれば即時・最新姿勢で再基準化
-  handle.resetFront = () => {
-    if (!havePose) { pendingReset = true; return; }
-    base.copy(qScreen).invert();
-  };
+  // 正面リセット: 【前段処理=自動キャリブレーション】を必ず実施 = 次の deviceorientation の
+  // 新鮮な姿勢(screen角込み)で再基準化してから正面を決める。(古い姿勢/直前値で基準化しない)
+  // ※自動キャリブ(向き切替)と全く同じ経路を通るため、ダブルタップと自動が同一挙動になる。
+  handle.resetFront = () => { pendingReset = true; };
   window.addEventListener('deviceorientation', onRot);
   handle.stop = () => window.removeEventListener('deviceorientation', onRot);
   return handle;
