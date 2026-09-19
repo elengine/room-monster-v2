@@ -27,6 +27,13 @@ export type GyroHandle = {
 const Z = new THREE.Vector3(0, 0, 1);
 const deg = (v: number | null) => THREE.MathUtils.degToRad(v ?? 0);
 
+// iOS(iPhone/iPad)判定: iPad は UA 上 Mac になるため maxTouchPoints でも補足
+const isIOS = (() => {
+  const ua = navigator.userAgent;
+  return /iPad|iPhone|iPod/.test(ua) ||
+    (/Macintosh|MacIntel/.test(ua) && (((navigator as unknown as { maxTouchPoints?: number }).maxTouchPoints) ?? 0) > 1);
+})();
+
 // 設定オフセット(度) — 相対化後の微調整用
 let horizonOffset = 0; // チルト(±45)
 let panOffset = 0;      // 左右パンニング(±45)
@@ -43,9 +50,22 @@ const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
  * window/device に非依存で実機なしにテスト可能。
  * (3.5.1: 3.5.0のiPad特化分岐を撤去し 3.4.1 相当へ復元。iOS/Androidそれぞれの正規化は調査→再設計)
  */
-export function computeQScreen(alphaDeg: number, betaDeg: number, gammaDeg: number, orientDeg: number): THREE.Quaternion {
+/**
+ * 純粋計算: α(方位)/β(前後)/γ(左右) と 画面角(orient, deg) から「端末姿勢→カメラ向き」Quaternion を返す。
+ * iOSとAndroidで β/γ のラベリングが入れ替わる実機データに基づき、機種×向きで「上」をピッチに正規化。
+ * テストで「Fold8/iPad の全『上』行(7行)で fwdY増加=上を向く」「天地反転なし」を担保。
+ * ※注意: γ由来の左右ロール(ねじり)は現状0扱い。yawはα、pitchは機種別正規化。実機でロール要調整なら更に追加。
+ */
+export function computeQScreen(alphaDeg: number, betaDeg: number, gammaDeg: number, orientDeg: number, isIOS = false): THREE.Quaternion {
+  const m = ((orientDeg % 360) + 360) % 360;
+  let pitch: number;
+  if (isIOS) {
+    pitch = m === 0 ? 90 - gammaDeg : m === 90 ? betaDeg - 90 : m === 180 ? 90 + gammaDeg : -betaDeg - 90;
+  } else {
+    pitch = m === 0 ? betaDeg - 90 : m === 90 ? 90 - gammaDeg : 180 - gammaDeg;
+  }
   const e = new THREE.Euler();
-  e.set(deg(betaDeg), deg(gammaDeg), -deg(alphaDeg), 'YXZ');
+  e.set(deg(pitch), deg(alphaDeg), 0, 'YXZ');
   const q = new THREE.Quaternion().setFromEuler(e);
   q.multiply(_q1);
   q.multiply(new THREE.Quaternion().setFromAxisAngle(Z, -deg(orientDeg)));
@@ -89,7 +109,7 @@ export function startGyro(): GyroHandle {
 
   const onRot = (e: DeviceOrientationEvent): void => {
     if (e.alpha == null || e.beta == null || e.gamma == null) return;
-    qScreen.copy(computeQScreen(e.alpha, e.beta, e.gamma, screenAngleDeg()));
+    qScreen.copy(computeQScreen(e.alpha, e.beta, e.gamma, screenAngleDeg(), isIOS));
     havePose = true;
     snap.alpha = e.alpha; snap.beta = e.beta; snap.gamma = e.gamma; snap.orient = screenAngleDeg();
     // 自動キャリブ/ダブルタップで要求された場合は【この新鮮な姿勢】で基準化(旧姿勢でやらない)
