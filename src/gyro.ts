@@ -27,6 +27,13 @@ export type GyroHandle = {
 const Z = new THREE.Vector3(0, 0, 1);
 const deg = (v: number | null) => THREE.MathUtils.degToRad(v ?? 0);
 
+// iOS(iPhone/iPad)判定: iPad は UA 上 Mac になるため maxTouchPoints でも補足
+const isIOS = (() => {
+  const ua = navigator.userAgent;
+  return /iPad|iPhone|iPod/.test(ua) ||
+    (/Macintosh|MacIntel/.test(ua) && (((navigator as unknown as { maxTouchPoints?: number }).maxTouchPoints) ?? 0) > 1);
+})();
+
 // 設定オフセット(度) — 相対化後の微調整用
 let horizonOffset = 0; // チルト(±45)
 let panOffset = 0;      // 左右パンニング(±45)
@@ -43,13 +50,15 @@ const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
  * window/device に非依存で実機なしにテスト可能。
  * (3.5.1: 3.5.0のiPad特化分岐を撤去し 3.4.1 相当へ復元。iOS/Androidそれぞれの正規化は調査→再設計)
  */
-export function computeQScreen(alphaDeg: number, betaDeg: number, gammaDeg: number, orientDeg: number): THREE.Quaternion {
+export function computeQScreen(alphaDeg: number, betaDeg: number, gammaDeg: number, orientDeg: number, isIOS = false): THREE.Quaternion {
   // 【確立式をそのまま移植】euler(β, α, −γ, 'YXZ') → ×q1(−√0.5,0,0,√0.5) → ×Rz(−画面角)
+  // +iPad/iPhone は「左⇔上」が入れ替わる90°オフセット(実機: Android完璧/iPadは左→上化)を追加
   const e = new THREE.Euler();
   e.set(deg(betaDeg), deg(alphaDeg), -deg(gammaDeg), 'YXZ');
   const q = new THREE.Quaternion().setFromEuler(e);
   q.multiply(_q1);
   q.multiply(new THREE.Quaternion().setFromAxisAngle(Z, -deg(orientDeg)));
+  if (isIOS) q.multiply(new THREE.Quaternion().setFromAxisAngle(Z, Math.PI / 2)); // iPad専用90°(左右↔上下を正す)
   return q;
 }
 
@@ -90,7 +99,7 @@ export function startGyro(): GyroHandle {
 
   const onRot = (e: DeviceOrientationEvent): void => {
     if (e.alpha == null || e.beta == null || e.gamma == null) return;
-    qScreen.copy(computeQScreen(e.alpha, e.beta, e.gamma, screenAngleDeg()));
+    qScreen.copy(computeQScreen(e.alpha, e.beta, e.gamma, screenAngleDeg(), isIOS));
     havePose = true;
     snap.alpha = e.alpha; snap.beta = e.beta; snap.gamma = e.gamma; snap.orient = screenAngleDeg();
     // 自動キャリブ/ダブルタップで要求された場合は【この新鮮な姿勢】で基準化(旧姿勢でやらない)
