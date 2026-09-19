@@ -44,8 +44,9 @@ const _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
  * (3.5.1: 3.5.0のiPad特化分岐を撤去し 3.4.1 相当へ復元。iOS/Androidそれぞれの正規化は調査→再設計)
  */
 export function computeQScreen(alphaDeg: number, betaDeg: number, gammaDeg: number, orientDeg: number): THREE.Quaternion {
+  // 【確立式をそのまま移植】euler(β, α, −γ, 'YXZ') → ×q1(−√0.5,0,0,√0.5) → ×Rz(−画面角)
   const e = new THREE.Euler();
-  e.set(deg(betaDeg), deg(gammaDeg), -deg(alphaDeg), 'YXZ');
+  e.set(deg(betaDeg), deg(alphaDeg), -deg(gammaDeg), 'YXZ');
   const q = new THREE.Quaternion().setFromEuler(e);
   q.multiply(_q1);
   q.multiply(new THREE.Quaternion().setFromAxisAngle(Z, -deg(orientDeg)));
