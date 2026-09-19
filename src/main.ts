@@ -218,7 +218,7 @@ function wireSettings(): void {
       on(el.value);
     });
   };
-  bind('horizon', 'oheya2:horizon', '25', '°', (v) => setHorizon(parseFloat(v) || 25));
+  bind('horizon', 'oheya2:horizon', '0', '°', (v) => setHorizon(parseFloat(v) || 0));
   bind('pan', 'oheya2:pan', '0', '°', (v) => setPan(parseFloat(v) || 0));
   bind('depth', 'oheya2:depth', '3', '', () => {});
   bind('flyh', 'oheya2:flyh', '3', '', () => {});

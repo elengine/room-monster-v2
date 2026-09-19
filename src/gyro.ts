@@ -26,8 +26,8 @@ const Z = new THREE.Vector3(0, 0, 1);
 const deg = (v: number | null) => THREE.MathUtils.degToRad(v ?? 0);
 
 // 設定オフセット(度) — 相対化後の微調整用
-let horizonOffset = 25; // 地平線(初期25)
-let panOffset = 0;      // 左右パンニング
+let horizonOffset = 0; // チルト(±45)
+let panOffset = 0;      // 左右パンニング(±45)
 export function setHorizon(d: number): void { horizonOffset = d; }
 export function getHorizon(): number { return horizonOffset; }
 export function setPan(d: number): void { panOffset = d; }
@@ -56,9 +56,7 @@ export function startGyro(): GyroHandle {
   if (!('DeviceOrientationEvent' in window)) return handle;
 
   const euler = new THREE.Euler();
-  const qAbs = new THREE.Quaternion();   // センサ→ワールド(固定変換の前提: portrait)
-  const z90 = new THREE.Quaternion().setFromAxisAngle(Z, -Math.PI / 2);
-  const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+  const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // 端末姿勢をカメラ基準へ
   const qScreen = new THREE.Quaternion(); // 画面向き込みの現姿勢
   const qPan = new THREE.Quaternion();
   const qTilt = new THREE.Quaternion();
@@ -71,11 +69,12 @@ export function startGyro(): GyroHandle {
 
   const onRot = (e: DeviceOrientationEvent): void => {
     if (e.alpha == null || e.beta == null || e.gamma == null) return;
+    // 標準合成: 端末の絶対姿勢(beta,gamma,-alpha,'YXZ') × 画面向き(screen角) により、
+    // ポートレート/ランドスケープ共通で「端末を動かす=カメラが同じ向きに動く」FPSになる
     euler.set(deg(e.beta), deg(e.gamma), -deg(e.alpha), 'YXZ');
-    qAbs.setFromEuler(euler);
-    qAbs.multiply(z90).multiply(q1);
-    // 画面回転(縦⇔横)を端末の画面法線まわりに足す → 端末を回しても「上」が崩れない
-    qScreen.copy(qAbs).multiply(new THREE.Quaternion().setFromAxisAngle(Z, -deg(screenAngleDeg())));
+    qScreen.setFromEuler(euler);
+    qScreen.multiply(q1);
+    qScreen.multiply(new THREE.Quaternion().setFromAxisAngle(Z, -deg(screenAngleDeg())));
     havePose = true;
     // 自動キャリブ/ダブルタップで要求された場合は【この新鮮な姿勢】で基準化(旧姿勢でやらない)
     if (pendingReset) {
@@ -83,7 +82,7 @@ export function startGyro(): GyroHandle {
       base.copy(qScreen).invert();
     }
     qPan.setFromAxisAngle(frame, deg(panOffset));
-    qTilt.setFromAxisAngle(side, -deg(horizonOffset)); // チルト方向: +で下を向く(現行と反転)
+    qTilt.setFromAxisAngle(side, -deg(horizonOffset)); // チルト方向: +で下を向く
     // 相対追従 + リセット後のチルト/パン補正
     handle.q.copy(base).multiply(qScreen).multiply(qPan).multiply(qTilt);
     handle.active = true;
