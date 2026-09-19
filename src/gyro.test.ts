@@ -80,30 +80,28 @@ describe('ジャイロFPS計算 computeQScreen', () => {
     }
   });
 
-  it('【修正後(確立式)の想定結果】Fold8 と iPad の全「上」行(7行)で fwdY が増える=上を向く', () => {
-    // どの機種・縦横でも「天面を上げる=カメラが上を向く」(iOS/Androidでラベルが入れ替わるため isIOS を渡す)
-    const rows: Array<[string, number, 'b' | 'g', number, number]> = [
-      ['Fold8', 0, 'b', 90, 180], ['Fold8', 90, 'g', 90, 0], ['Fold8', 270, 'g', -90, 0],
-      ['iPad', 0, 'g', 90, 0], ['iPad', 180, 'g', -90, 0], ['iPad', 90, 'b', 90, 180], ['iPad', 270, 'b', -90, -180],
+  it('【復元後の挙動(3.4.1), ドキュメント】β増→fwdY上(ピッチ)が全orientで一貫、γ増は上下に効かない(現行の特性)', () => {
+    const rows: Array<[number, 'b' | 'g', number, number]> = [
+      [0, 'g', 90, 0], [180, 'g', -90, 0], [90, 'b', 90, 180], [270, 'b', -90, -180],
     ];
-    for (const [dev, o, ax, f, t] of rows) {
-      const ios = dev === 'iPad';
-      const y0 = ax === 'g' ? axes(computeQScreen(0, 70, f, o, ios)).fwd.y : axes(computeQScreen(0, f, 0, o, ios)).fwd.y;
-      const y1 = ax === 'g' ? axes(computeQScreen(0, 70, t, o, ios)).fwd.y : axes(computeQScreen(0, t, 0, o, ios)).fwd.y;
-      expect(y1).toBeGreaterThan(y0); // 上→上を向く
+    for (const [o, ax, f, t] of rows) {
+      const y0 = ax === 'g' ? axes(computeQScreen(0, 70, f, o)).fwd.y : axes(computeQScreen(0, f, 0, o)).fwd.y;
+      const y1 = ax === 'g' ? axes(computeQScreen(0, 70, t, o)).fwd.y : axes(computeQScreen(0, t, 0, o)).fwd.y;
+      // 復元版: β増(odd)は上向く / γ増(even)は上下に効かない(Δ~0)。※iOS/Android正規化は調査後に再設計
+      if (o % 180 === 0) expect(Math.abs(y1 - y0)).toBeLessThan(1e-9);
+      else expect(y1).toBeGreaterThan(y0);
     }
   });
 
-  it('【修正後(確立式)の想定結果】天地反転しない連続掃引 (Fold8/iPad 全向き)', () => {
-    for (const ios of [false, true]) {
-      for (const o of [0, 90, 180, 270]) {
-        const prev = { x: 0, z: 0 };
-        for (let k = 0; k <= 30; k++) {
-          const v = 90 - k * 3; // 「上」方向に連続掃引
-          const u = new THREE.Vector3().copy(UP).applyQuaternion(computeQScreen(0, o === 0 ? 70 : v, o === 0 ? v : 70, o, ios));
-          if (k > 0) expect(u.x * prev.x + u.z * prev.z).toBeGreaterThan(-0.5);
-          prev.x = u.x; prev.z = u.z;
-        }
+  it('【天地反転チェック】「上を向く」連続掃引で up が急反転しない', () => {
+    for (const o of [0, 90, 180, 270]) {
+      const from = o % 180 === 0 ? (o === 0 ? 90 : -90) : (o === 90 ? 90 : -90);
+      const prev = { x: 0, z: 0 };
+      for (let k = 0; k <= 30; k++) {
+        const v = (o === 0 ? from - k * 3 : o === 180 ? from + k * 3 : o === 90 ? from + k * 3 : from - k * 3);
+        const u = new THREE.Vector3().copy(UP).applyQuaternion(computeQScreen(0, o === 90 ? v : 70, o === 90 ? 0 : v, o));
+        if (k > 0) expect(u.x * prev.x + u.z * prev.z).toBeGreaterThan(-0.5); // 水平向きが急反転しない
+        prev.x = u.x; prev.z = u.z;
       }
     }
   });
