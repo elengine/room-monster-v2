@@ -58,7 +58,7 @@ export function computeQScreen(alphaDeg: number, betaDeg: number, gammaDeg: numb
   const q = new THREE.Quaternion().setFromEuler(e);
   q.multiply(_q1);
   q.multiply(new THREE.Quaternion().setFromAxisAngle(Z, -deg(orientDeg)));
-  if (isIOS) q.multiply(new THREE.Quaternion().setFromAxisAngle(Z, Math.PI / 2)); // iPad専用90°(左右↔上下を正す)
+  if (isIOS) q.multiply(new THREE.Quaternion().setFromAxisAngle(Z, (orientDeg % 180 === 0 ? -1 : 1) * Math.PI / 2)); // iPad: 奇数90/270=+90° / 偶数0/180=−90°(実機)
   return q;
 }
 
