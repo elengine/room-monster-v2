@@ -281,7 +281,7 @@ async function boot(): Promise<void> {
   $('ver').textContent = `ver ${__APP_VERSION__}`;
   field.onResize();
   addEventListener('resize', () => field.onResize());
-  addEventListener('orientationchange', () => setTimeout(() => field.onResize(), 250));
+  addEventListener('orientationchange', () => setTimeout(() => { field.onResize(); gyroHandle?.calibrate(); }, 250));
   wireSettings();
   refreshCatch();
   // 実機デバッグHUD( 見つからない問題の調査専用 ): 画面左上に3秒間の実測値を表示
@@ -408,6 +408,8 @@ async function startGame(): Promise<void> {
   unlockAudio();
   const ok = await requestGyroPermission(); // タップ直後にジャイロ許可
   gyroHandle = startGyro();
+  gyroHandle?.calibrate(); // スタートタップ時点の向きを「正面=0」に基準化
+  wireDoubleTapReset();
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } }, audio: false });
@@ -429,7 +431,7 @@ async function startGame(): Promise<void> {
   hud.classList.remove('hidden');
   forceHud();
   startBGM();
-  showStatus('まわりを映して モンスターをさがそう');
+  showStatus('スタート時の向きが まえ・2回タップで変更');
   cooldown = 1.5;
   if (!gestureWired) {
     gestureWired = true;
@@ -446,6 +448,23 @@ function exitGame(): void {
   stream?.getTracks().forEach((t) => t.stop());
   stream = null;
   for (const m of [...monsters]) removeMonster(m);
+}
+
+/** ゲーム画面のダブルタップで「今向いている方向」を正面にリセット(キャリブレーション) */
+function wireDoubleTapReset(): void {
+  if ((window as unknown as { __dblTapWired?: boolean }).__dblTapWired) return;
+  (window as unknown as { __dblTapWired?: boolean }).__dblTapWired = true;
+  let last = 0;
+  window.addEventListener('pointerdown', () => {
+    if (hud.classList.contains('hidden')) return;      // ゲーム中のみ
+    const now = performance.now();
+    if (now - last < 400) {
+      gyroHandle?.calibrate();
+      sfx('tap');
+      showStatus('いまの向きを まえ にセット！');
+    }
+    last = now;
+  }, { passive: true });
 }
 
 /** フリック投げ: 常駐ボール(DOM)をフリックで投げ、近いモンスターへ飛ばす */
